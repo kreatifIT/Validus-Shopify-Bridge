@@ -41,7 +41,7 @@ query { locations(first: 5) { nodes { id name } } }
 
 ### Product code format
 
-`config('validus-shopify.grouping')` controls how `code.code` (e.g. `"56070025"`) is split into a grouping key and a vintage year. The defaults match Kellerei St. Michael's confirmed format: first 2 digits = product, last 2 digits = vintage (with a `20` century prefix). The digits in between are intentionally ignored - bottle size/format comes from the separate `code.bottleCapacity` + `code.measureUnit` API fields instead. A future customer with a different Validus code scheme can supply their own `Kreatif\ValidusShopifyBridge\Grouping\VariantGroupingStrategy` implementation and bind it in their own service provider instead of `ProductCodeGroupingStrategy`.
+`config('validus-shopify.grouping')` controls how `code.code` (e.g. `"56070025"`) is split into a grouping key and a vintage year. The defaults assume a common layout: first 2 digits = product, last 2 digits = vintage (with a `20` century prefix). The digits in between are intentionally ignored - bottle size/format comes from the separate `code.bottleCapacity` + `code.measureUnit` API fields instead. Confirm the exact digit layout with your customer; if their Validus code scheme doesn't fit this pattern at all, supply your own `Kreatif\ValidusShopifyBridge\Grouping\VariantGroupingStrategy` implementation and bind it in your own service provider instead of `ProductCodeGroupingStrategy`.
 
 ### Payment codes
 
@@ -91,7 +91,7 @@ Schedule it in `routes/console.php` or `bootstrap/app.php` if it should run auto
 Schedule::command('validus-shopify:sync-products')->hourly();
 ```
 
-New variants are imported **without** inventory tracking enabled (manual decision per variant in Shopify Admin, matching the existing workflow at Kellerei St. Michael). Once a variant is flipped to tracked in Shopify, subsequent syncs push `qtyInStock` for it automatically.
+New variants are imported **without** inventory tracking enabled (a manual, per-variant decision in Shopify Admin). Once a variant is flipped to tracked in Shopify, subsequent syncs push `qtyInStock` for it automatically.
 
 ## Known open items
 

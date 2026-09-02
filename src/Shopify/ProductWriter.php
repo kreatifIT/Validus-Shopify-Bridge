@@ -74,7 +74,7 @@ class ProductWriter
     }
 
     /**
-     * Only called for variants Iris has already flipped to "tracked" in
+     * Only called for variants someone has already flipped to "tracked" in
      * Shopify - new imports stay untracked by default (see config).
      */
     public function setInventoryQuantity(string $inventoryItemId, string $locationId, int $quantity): void

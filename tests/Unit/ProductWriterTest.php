@@ -32,8 +32,8 @@ class ProductWriterTest extends TestCase
         ]);
 
         $result = $this->writer()->upsertProduct([
-            'title' => 'Sauvignon Sanct Valentin',
-            'options' => [['name' => 'Jahrgang', 'values' => ['2025']]],
+            'title' => 'Demo Wine',
+            'options' => [['name' => 'Vintage', 'values' => ['2025']]],
             'variants' => [['sku' => '56070025', 'price' => '18.00']],
             'shopifyProductId' => null,
         ]);
@@ -43,7 +43,7 @@ class ProductWriterTest extends TestCase
 
         Http::assertSent(function ($request) {
             return str_contains($request['query'], 'productSet')
-                && $request['variables']['input']['title'] === 'Sauvignon Sanct Valentin'
+                && $request['variables']['input']['title'] === 'Demo Wine'
                 && ! isset($request['variables']['input']['id']);
         });
     }
@@ -57,7 +57,7 @@ class ProductWriterTest extends TestCase
         ]);
 
         $this->writer()->upsertProduct([
-            'title' => 'Sauvignon Sanct Valentin',
+            'title' => 'Demo Wine',
             'options' => [],
             'variants' => [],
             'shopifyProductId' => 'gid://shopify/Product/1',

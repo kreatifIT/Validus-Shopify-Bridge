@@ -18,11 +18,11 @@ class ProductCodeGroupingStrategyTest extends TestCase
 
     public function test_group_key_uses_first_two_digits_of_code(): void
     {
-        $sauvignon = ['code' => ['code' => '56070025']];
-        $appius = ['code' => ['code' => '99070121']];
+        $productA = ['code' => ['code' => '56070025']];
+        $productB = ['code' => ['code' => '99070121']];
 
-        $this->assertSame('56', $this->strategy->groupKey($sauvignon));
-        $this->assertSame('99', $this->strategy->groupKey($appius));
+        $this->assertSame('56', $this->strategy->groupKey($productA));
+        $this->assertSame('99', $this->strategy->groupKey($productB));
     }
 
     public function test_different_formats_of_the_same_product_share_a_group_key(): void

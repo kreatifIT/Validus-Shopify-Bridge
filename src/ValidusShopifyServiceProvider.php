@@ -45,6 +45,8 @@ class ValidusShopifyServiceProvider extends ServiceProvider
             locationId: config('validus-shopify.shopify.location_id'),
             pricesIncludeTax: (bool) config('validus-shopify.shopify.prices_include_tax', false),
             trackNewVariants: (bool) config('validus-shopify.track_new_variants', false),
+            vintageOptionName: (string) config('validus-shopify.shopify.option_names.vintage', 'Vintage'),
+            formatOptionName: (string) config('validus-shopify.shopify.option_names.format', 'Format'),
         ));
 
         $this->app->singleton(OrderExportService::class, fn () => new OrderExportService(

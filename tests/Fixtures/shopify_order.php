@@ -43,7 +43,7 @@ return [
             'id' => 111,
             'variant_id' => 424242,
             'sku' => '99070121',
-            'name' => 'Appius 2021 - 0,75l',
+            'name' => 'Demo Reserve 2021 - 0,75l',
             'quantity' => 2,
             'price' => '12.50',
             'tax_lines' => [

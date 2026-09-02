@@ -3,13 +3,14 @@
 namespace Kreatif\ValidusShopifyBridge\Grouping;
 
 /**
- * Kellerei St. Michael's confirmed code.code format (8 digits, e.g.
- * "56070025"): first N digits identify the product ("56" = Sauvignon Sanct
- * Valentin, "99" = Appius), last N digits are the vintage year (2-digit,
- * century prefix assumed). The middle digits are explicitly ignored per the
- * customer - despite looking like bottle size/case quantity in the examples
- * they gave, the customer said not to parse them; bottle size instead comes
- * from the separate code.bottleCapacity/measureUnit API fields.
+ * Default grouping strategy for a common Validus code.code format: a fixed
+ * number of leading digits identify the product, a fixed number of trailing
+ * digits are the vintage year (2-digit, century prefix assumed), and
+ * anything in between is ignored - bottle size/format is expected to come
+ * from the separate code.bottleCapacity/measureUnit API fields instead, not
+ * from parsing the code further. Confirm the exact digit layout with the
+ * customer per install; a customer whose Validus code scheme doesn't fit
+ * this pattern at all can supply their own VariantGroupingStrategy instead.
  */
 class ProductCodeGroupingStrategy implements VariantGroupingStrategy
 {

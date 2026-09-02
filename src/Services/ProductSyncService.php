@@ -17,6 +17,8 @@ class ProductSyncService
         protected ?string $locationId,
         protected bool $pricesIncludeTax,
         protected bool $trackNewVariants,
+        protected string $vintageOptionName = 'Vintage',
+        protected string $formatOptionName = 'Format',
     ) {}
 
     /**
@@ -62,8 +64,8 @@ class ProductSyncService
                     'sku' => $sku,
                     'price' => $this->price($validusProduct),
                     'optionValues' => [
-                        ['optionName' => 'Jahrgang', 'name' => $year],
-                        ['optionName' => 'Format', 'name' => $format],
+                        ['optionName' => $this->vintageOptionName, 'name' => $year],
+                        ['optionName' => $this->formatOptionName, 'name' => $format],
                     ],
                 ],
             ];
@@ -81,8 +83,8 @@ class ProductSyncService
         $upserted = $this->shopify->upsertProduct([
             'title' => $title,
             'options' => [
-                ['name' => 'Jahrgang', 'values' => array_values(array_unique($years))],
-                ['name' => 'Format', 'values' => array_values(array_unique($formats))],
+                ['name' => $this->vintageOptionName, 'values' => array_values(array_unique($years))],
+                ['name' => $this->formatOptionName, 'values' => array_values(array_unique($formats))],
             ],
             'variants' => array_map(fn (array $v) => $v['input'], array_values($variantsBySku)),
             'shopifyProductId' => $existingProductId,
@@ -119,7 +121,7 @@ class ProductSyncService
     }
 
     /**
-     * Only pushes qtyInStock for variants Iris has already flipped to
+     * Only pushes qtyInStock for variants someone has already flipped to
      * "tracked" in Shopify - new imports stay untracked by default.
      *
      * @param  array{productId: string, variants: array<int, array{id: string, sku: string}>}  $upserted
@@ -176,10 +178,9 @@ class ProductSyncService
     }
 
     /**
-     * Bottle size label, matching the "150cl" convention already used for
-     * variants imported directly from Shopify on this site. bottleCapacity
-     * is assumed to be in liters (Validus doesn't say so explicitly for
-     * measureUnit "pz" - confirm with Roman before go-live).
+     * Bottle size label in the "150cl" style. bottleCapacity is assumed to
+     * be in liters - Validus doesn't say so explicitly for every
+     * measureUnit value, confirm with the customer before go-live.
      *
      * @param  array<string, mixed>  $validusProduct
      */
@@ -188,7 +189,7 @@ class ProductSyncService
         $capacity = Arr::get($validusProduct, 'code.bottleCapacity');
 
         if ($capacity === null) {
-            return 'unbekannt';
+            return 'unknown';
         }
 
         $centiliters = $capacity * 100;

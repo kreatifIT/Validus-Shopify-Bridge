@@ -10,7 +10,8 @@ use Kreatif\ValidusShopifyBridge\Models\ProductMap;
  * Builds the JSON payload ValidusClient::createOrder() expects from a
  * Shopify "orders/paid" webhook payload (standard REST order object shape).
  *
- * Deliberately left open per the plan, pending Roman/Iris/Georg:
+ * Deliberately left open, to be resolved with the customer per install
+ * rather than guessed at generically:
  * - a line item without a variant_id (gift cards, manual draft-order lines,
  *   a possible future voucher line item type) has no ProductMap entry to
  *   resolve, so buildPayload() throws rather than send an incomplete order

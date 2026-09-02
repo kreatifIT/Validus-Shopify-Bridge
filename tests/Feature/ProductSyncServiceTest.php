@@ -18,7 +18,7 @@ class ProductSyncServiceTest extends TestCase
         return [
             [
                 'id' => 1001,
-                'name' => 'Sauvignon Sanct Valentin',
+                'name' => 'Demo Wine',
                 'code' => ['code' => '56070025', 'year' => 2025, 'bottleCapacity' => 0.75, 'measureUnit' => 'pz'],
                 'price' => ['fullPrice' => 18.0, 'discountedPrice' => 18.0],
                 'tax' => ['rate' => 22],
@@ -26,7 +26,7 @@ class ProductSyncServiceTest extends TestCase
             ],
             [
                 'id' => 1002,
-                'name' => 'Sauvignon Sanct Valentin',
+                'name' => 'Demo Wine',
                 'code' => ['code' => '56090125', 'year' => 2025, 'bottleCapacity' => 1.5, 'measureUnit' => 'pz'],
                 'price' => ['fullPrice' => 38.0, 'discountedPrice' => 38.0],
                 'tax' => ['rate' => 22],
@@ -62,7 +62,7 @@ class ProductSyncServiceTest extends TestCase
         $writer->shouldReceive('upsertProduct')
             ->once()
             ->withArgs(function (array $product) {
-                return $product['title'] === 'Sauvignon Sanct Valentin'
+                return $product['title'] === 'Demo Wine'
                     && $product['shopifyProductId'] === null
                     && count($product['variants']) === 2;
             })

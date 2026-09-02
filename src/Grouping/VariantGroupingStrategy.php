@@ -5,9 +5,10 @@ namespace Kreatif\ValidusShopifyBridge\Grouping;
 /**
  * Decides how flat Validus products (one row per vintage/format) are grouped
  * into a single Shopify product with multiple variants, and what vintage
- * year to use per variant. Kellerei St. Michael's code format is handled by
- * ProductCodeGroupingStrategy; a future customer with a different Validus
- * code scheme can supply their own implementation via config.
+ * year to use per variant. A common code.code layout is handled by
+ * ProductCodeGroupingStrategy; a customer with a different Validus code
+ * scheme can supply their own implementation and bind it in their own
+ * service provider instead.
  */
 interface VariantGroupingStrategy
 {
