@@ -22,7 +22,7 @@ class ProductSyncService
     ) {}
 
     /**
-     * @return array{groups: int, variants: int, dryRun: bool}
+     * @return array{groups: int, variants: int, dryRun: bool, preview: array<int, array<string, mixed>>}
      */
     public function run(bool $dryRun = false): array
     {
@@ -30,19 +30,31 @@ class ProductSyncService
             ->groupBy(fn (array $product) => $this->grouping->groupKey($product));
 
         $variantCount = 0;
+        $preview = [];
 
         foreach ($groups as $groupKey => $validusProducts) {
-            $this->syncGroup((string) $groupKey, $validusProducts->all(), $dryRun);
+            $groupPreview = $this->syncGroup((string) $groupKey, $validusProducts->all(), $dryRun);
             $variantCount += $validusProducts->count();
+
+            if ($dryRun) {
+                $preview[] = $groupPreview;
+            }
         }
 
-        return ['groups' => $groups->count(), 'variants' => $variantCount, 'dryRun' => $dryRun];
+        return ['groups' => $groups->count(), 'variants' => $variantCount, 'dryRun' => $dryRun, 'preview' => $preview];
     }
 
     /**
+     * Builds the product/variant payload and looks up whether it would
+     * create a new Shopify product or update an existing one either way -
+     * that lookup only touches the local ProductMap table, never Shopify,
+     * so it's safe to run in dry-run mode too and gives --dry-run something
+     * concrete to show instead of just a count.
+     *
      * @param  array<int, array<string, mixed>>  $validusProducts
+     * @return array{groupKey: string, title: string, action: string, shopifyProductId: ?string, variants: array<int, array{sku: string, vintage: string, format: string, price: string}>}
      */
-    protected function syncGroup(string $groupKey, array $validusProducts, bool $dryRun): void
+    protected function syncGroup(string $groupKey, array $validusProducts, bool $dryRun): array
     {
         $title = $validusProducts[0]['name'] ?? $groupKey;
 
@@ -54,6 +66,7 @@ class ProductSyncService
             $sku = $validusProduct['code']['code'] ?? (string) $validusProduct['id'];
             $year = (string) ($this->grouping->vintageYear($validusProduct) ?? '');
             $format = $this->formatLabel($validusProduct);
+            $price = $this->price($validusProduct);
 
             $years[] = $year;
             $formats[] = $format;
@@ -62,23 +75,32 @@ class ProductSyncService
                 'validusProduct' => $validusProduct,
                 'input' => [
                     'sku' => $sku,
-                    'price' => $this->price($validusProduct),
+                    'price' => $price,
                     'optionValues' => [
                         ['optionName' => $this->vintageOptionName, 'name' => $year],
                         ['optionName' => $this->formatOptionName, 'name' => $format],
                     ],
                 ],
+                'preview' => ['sku' => $sku, 'vintage' => $year, 'format' => $format, 'price' => $price],
             ];
-        }
-
-        if ($dryRun) {
-            return;
         }
 
         $existingProductId = ProductMap::query()
             ->where('validus_code', 'like', $groupKey.'%')
             ->whereNotNull('shopify_product_id')
             ->value('shopify_product_id');
+
+        $groupPreview = [
+            'groupKey' => $groupKey,
+            'title' => $title,
+            'action' => $existingProductId ? 'update' : 'create',
+            'shopifyProductId' => $existingProductId,
+            'variants' => array_map(fn (array $v) => $v['preview'], array_values($variantsBySku)),
+        ];
+
+        if ($dryRun) {
+            return $groupPreview;
+        }
 
         $upserted = $this->shopify->upsertProduct([
             'title' => $title,
@@ -92,6 +114,8 @@ class ProductSyncService
 
         $this->storeMapping($upserted, $variantsBySku);
         $this->syncInventory($upserted, $variantsBySku);
+
+        return $groupPreview;
     }
 
     /**

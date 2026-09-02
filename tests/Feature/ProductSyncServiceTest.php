@@ -152,4 +152,41 @@ class ProductSyncServiceTest extends TestCase
         $this->assertTrue($result['dryRun']);
         $this->assertSame(0, ProductMap::query()->count());
     }
+
+    public function test_dry_run_previews_what_would_be_created_or_updated(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+
+        $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldNotReceive('upsertProduct');
+
+        $result = $this->service($writer)->run(dryRun: true);
+
+        $this->assertCount(1, $result['preview']);
+        $this->assertSame('create', $result['preview'][0]['action']);
+        $this->assertSame('Demo Wine', $result['preview'][0]['title']);
+        $this->assertCount(2, $result['preview'][0]['variants']);
+        $this->assertSame('56070025', $result['preview'][0]['variants'][0]['sku']);
+        $this->assertSame('2025', $result['preview'][0]['variants'][0]['vintage']);
+    }
+
+    public function test_dry_run_reports_update_when_the_product_is_already_mapped(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+
+        ProductMap::query()->create([
+            'validus_id' => '1001',
+            'validus_code' => '56070025',
+            'shopify_product_id' => 'gid://shopify/Product/1',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/1',
+        ]);
+
+        $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldNotReceive('upsertProduct');
+
+        $result = $this->service($writer)->run(dryRun: true);
+
+        $this->assertSame('update', $result['preview'][0]['action']);
+        $this->assertSame('gid://shopify/Product/1', $result['preview'][0]['shopifyProductId']);
+    }
 }

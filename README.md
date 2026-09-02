@@ -78,12 +78,14 @@ The route is protected by an HMAC signature check against `SHOPIFY_WEBHOOK_SECRE
 ## Running the product sync
 
 ```bash
-# Preview what would be grouped, without writing to Shopify:
+# Preview what would be created/updated, without writing anything to Shopify:
 php artisan validus-shopify:sync-products --dry-run
 
 # Actually sync:
 php artisan validus-shopify:sync-products
 ```
+
+`--dry-run` prints a table of every product/variant it would touch - whether it's a new Shopify product or an update to an already-mapped one, the SKU, vintage, format and price it would write - and a summary count. Nothing is sent to Shopify in this mode; run it before the first real sync (and after any config change) to check the output looks right rather than finding out by looking at the live catalog.
 
 Schedule it in `routes/console.php` or `bootstrap/app.php` if it should run automatically, e.g.:
 
