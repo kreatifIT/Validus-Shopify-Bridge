@@ -120,6 +120,10 @@ This is controlled by the `deactivation` config block:
 
 New variants are imported **without** inventory tracking enabled (a manual, per-variant decision in Shopify Admin). Once a variant is flipped to tracked in Shopify, subsequent syncs push `qtyInStock` for it automatically.
 
+### A failing product doesn't stop the rest of the sync
+
+Each Validus product group (one Shopify product, e.g. all vintages/formats of one wine) is synced independently. If a group fails - most commonly Shopify rejecting a `productSet` call because two distinct Validus products collide on the same option values, see [Troubleshooting](#troubleshooting) below - that one group is skipped, `sync-products` prints it and exits non-zero, but every other group and the deactivation step still run. A `Kreatif\ValidusShopifyBridge\Events\ProductSyncGroupFailed` event fires for each failure (carrying the group key, product title and the exception) - the package doesn't send any notification itself, so bind a listener in the consuming app if you want one (email, Slack, etc.).
+
 ## Adopting a Shopify catalog that already has products in it
 
 `sync-products` only ever consults its own `validus_shopify_product_map` table to decide whether a Validus product is new (create) or already known (update) - it never checks Shopify itself. If the store already has products in it from before this package was introduced (imported manually, or by a previous process) and they happen to share a SKU with a Validus product, the first real sync would create a **duplicate** product for every one of them instead of updating the existing one, since nothing is mapped yet.
@@ -143,6 +147,41 @@ php artisan validus-shopify:link-existing
 
 Run `link-existing` once per store as part of onboarding it onto this package (a store with no pre-existing catalog can skip it - `sync-products` alone is enough). `diff` is safe to run at any time afterwards too, e.g. to spot-check for price drift or for a `diff`-listed product that Validus stopped returning entirely (`sync-products` only ever adds/updates a mapping, never removes one, so a discontinued product stays untouched in Shopify until someone acts on it manually).
 
+## Troubleshooting
+
+### `Access denied for productSet field. Required access: 'write_products' access scope`
+
+The Shopify Admin API token doesn't have the scopes this package needs. Fix it in Shopify Admin, not in code:
+
+1. *Settings → Apps and sales channels → Develop apps* → open the app the `SHOPIFY_ADMIN_TOKEN` belongs to.
+2. Tab **"Configuration"** → **"Admin API integration"** → *Edit* the API scopes.
+3. Enable at least **`write_products`** (covers `productSet`, `productVariantsBulkUpdate`, `productUpdate`) and **`write_inventory`** (covers `inventorySetQuantities`, `inventoryItemUpdate`, both used by the deactivation step). Add **`read_products`** / **`read_inventory`** too, for the read-only lookups (`variantsBySku`, `variantInventoryState`).
+4. Save, then **reinstall the app** - Shopify only issues a token with the new scopes after a reinstall, changing the scope list alone isn't enough. The existing `SHOPIFY_ADMIN_TOKEN` value usually stays valid (same token, now with more scopes); double check it on the same screen right after.
+
+If the error persists after reinstalling with the right scopes, the second half of the message ("the user must have a permission to create products") points at the *Shopify staff account* that installed/owns the app rather than the token itself - on Shopify Plus stores with locked staff permissions, that account also needs the "Products" permission.
+
+### `The variant 'X / Y' already exists. Please change at least one option value.`
+
+Two **distinct** Validus products (different `id`) resolve to the same Shopify option values (vintage + format) under the configured `VariantGroupingStrategy` - `productSet` then tries to create two variants with an identical option combination on the same product, which Shopify rejects. This is a data problem, not something to silently work around: find out from Validus/the customer what actually distinguishes the two products (a code digit the grouping strategy currently ignores, a packaging/lot difference, or simply a duplicate/erroneous entry that Validus should remove) before deciding how to disambiguate them - guessing risks silently merging or mispricing a real product.
+
+To find every colliding pair for a given `VariantGroupingStrategy` ahead of time:
+
+```php
+$grouping = app(\Kreatif\ValidusShopifyBridge\Grouping\VariantGroupingStrategy::class);
+$byKey = collect(app(\Kreatif\ValidusShopifyBridge\Clients\ValidusClient::class)->getProducts())
+    ->groupBy(fn ($p) => $grouping->groupKey($p));
+
+foreach ($byKey as $key => $group) {
+    foreach ($group->groupBy(fn ($p) => $grouping->vintageYear($p).'/'.($p['code']['bottleCapacity'] ?? '?')) as $combo => $items) {
+        if ($items->count() > 1) {
+            echo "{$key} {$items->first()['name']} - {$combo}: ".$items->pluck('code.code')->implode(', ').PHP_EOL;
+        }
+    }
+}
+```
+
+Until it's resolved, `sync-products` skips the affected group (see [above](#a-failing-product-doesnt-stop-the-rest-of-the-sync)) rather than failing the whole run or guessing which of the two to keep.
+
 ## Known open items
 
 These are deliberately left unhandled rather than guessed at - the corresponding code path throws instead of sending incomplete data:
@@ -150,6 +189,10 @@ These are deliberately left unhandled rather than guessed at - the corresponding
 - Discount/voucher line items and Italian customers' `fiscalId` (codice fiscale, not collected by Shopify's default checkout).
 - Payment gateways not yet listed in `payment_code_map`.
 - A Shopify order line item whose variant was never imported from Validus (no `ProductMap` entry).
+
+## Using with Claude Code
+
+`skills/validus-shopify-bridge/SKILL.md` covers the failure modes in this README that are easy to misdiagnose as a code bug (missing Shopify API scopes, an option-name mismatch, a Validus-side config error, colliding product codes, ...). If you use Claude Code on a project that installs this package, copy that file to `.claude/skills/validus-shopify-bridge/SKILL.md` in the project so Claude picks it up automatically - composer packages aren't scanned for skills on their own.
 
 ## Testing
 

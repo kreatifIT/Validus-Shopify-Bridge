@@ -24,10 +24,28 @@ class SyncValidusProducts extends Command
         }
 
         $this->renderDeactivation($result['deactivation'], $dryRun);
+        $this->renderFailures($result['failures']);
 
         $this->info("Done. {$result['groups']} Shopify product(s), {$result['variants']} variant(s) processed.");
 
-        return self::SUCCESS;
+        return empty($result['failures']) ? self::SUCCESS : self::FAILURE;
+    }
+
+    /**
+     * @param  array<int, array{groupKey: string, title: string, message: string}>  $failures
+     */
+    protected function renderFailures(array $failures): void
+    {
+        if (empty($failures)) {
+            return;
+        }
+
+        $this->newLine();
+        $this->error(count($failures).' product group(s) failed and were skipped - the rest of the sync still ran. A ProductSyncGroupFailed event was fired for each one:');
+
+        foreach ($failures as $failure) {
+            $this->line("  - {$failure['title']} ({$failure['groupKey']}): {$failure['message']}");
+        }
     }
 
     /**

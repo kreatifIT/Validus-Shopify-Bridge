@@ -4,9 +4,11 @@ namespace Kreatif\ValidusShopifyBridge\Services;
 
 use Illuminate\Support\Arr;
 use Kreatif\ValidusShopifyBridge\Clients\ValidusClient;
+use Kreatif\ValidusShopifyBridge\Events\ProductSyncGroupFailed;
 use Kreatif\ValidusShopifyBridge\Grouping\VariantGroupingStrategy;
 use Kreatif\ValidusShopifyBridge\Models\ProductMap;
 use Kreatif\ValidusShopifyBridge\Shopify\ProductWriter;
+use Throwable;
 
 class ProductSyncService
 {
@@ -22,7 +24,7 @@ class ProductSyncService
     ) {}
 
     /**
-     * @return array{groups: int, variants: int, dryRun: bool, preview: array<int, array<string, mixed>>, deactivation: array{skipped: ?string, variants: int, products: int}}
+     * @return array{groups: int, variants: int, dryRun: bool, preview: array<int, array<string, mixed>>, deactivation: array{skipped: ?string, variants: int, products: int}, failures: array<int, array{groupKey: string, title: string, message: string}>}
      */
     public function run(bool $dryRun = false): array
     {
@@ -31,15 +33,31 @@ class ProductSyncService
         $groups = collect($validusProducts)
             ->groupBy(fn (array $product) => $this->grouping->groupKey($product));
 
+        $successfulGroups = 0;
         $variantCount = 0;
         $preview = [];
+        $failures = [];
 
         foreach ($groups as $groupKey => $groupProducts) {
-            $groupPreview = $this->syncGroup((string) $groupKey, $groupProducts->all(), $dryRun);
-            $variantCount += $groupProducts->count();
+            // A data problem specific to one product (e.g. two distinct
+            // Validus products colliding on the same vintage/format
+            // combination, which Shopify then refuses as a duplicate
+            // variant) must not stop every other, unrelated product from
+            // being synced - catch per group, keep going, and report what
+            // failed at the end instead of letting the whole command crash.
+            try {
+                $groupPreview = $this->syncGroup((string) $groupKey, $groupProducts->all(), $dryRun);
+                $successfulGroups++;
+                $variantCount += $groupProducts->count();
 
-            if ($dryRun) {
-                $preview[] = $groupPreview;
+                if ($dryRun) {
+                    $preview[] = $groupPreview;
+                }
+            } catch (Throwable $e) {
+                $title = $groupProducts->first()['name'] ?? (string) $groupKey;
+                $failures[] = ['groupKey' => (string) $groupKey, 'title' => $title, 'message' => $e->getMessage()];
+                report($e);
+                event(new ProductSyncGroupFailed((string) $groupKey, $title, $e));
             }
         }
 
@@ -47,11 +65,12 @@ class ProductSyncService
         $deactivation = $this->deactivateRemoved($currentValidusIds, $dryRun);
 
         return [
-            'groups' => $groups->count(),
+            'groups' => $successfulGroups,
             'variants' => $variantCount,
             'dryRun' => $dryRun,
             'preview' => $preview,
             'deactivation' => $deactivation,
+            'failures' => $failures,
         ];
     }
 
