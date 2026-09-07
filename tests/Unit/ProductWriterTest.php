@@ -83,4 +83,58 @@ class ProductWriterTest extends TestCase
             'shopifyProductId' => null,
         ]);
     }
+
+    public function test_variants_by_sku_returns_matches_keyed_by_sku(): void
+    {
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => [
+                'productVariants' => ['nodes' => [
+                    [
+                        'id' => 'gid://shopify/ProductVariant/1',
+                        'sku' => '56070025',
+                        'price' => '18.00',
+                        'product' => ['id' => 'gid://shopify/Product/1', 'title' => 'Demo Wine'],
+                    ],
+                ]],
+            ]]),
+        ]);
+
+        $result = $this->writer()->variantsBySku(['56070025', '99999999']);
+
+        $this->assertSame([
+            '56070025' => [
+                'id' => 'gid://shopify/ProductVariant/1',
+                'price' => '18.00',
+                'productId' => 'gid://shopify/Product/1',
+                'productTitle' => 'Demo Wine',
+            ],
+        ], $result);
+
+        Http::assertSent(fn ($request) => str_contains($request['variables']['q'], 'sku:56070025')
+            && str_contains($request['variables']['q'], 'sku:99999999'));
+    }
+
+    public function test_variants_by_sku_returns_empty_array_without_calling_shopify(): void
+    {
+        Http::fake();
+
+        $this->assertSame([], $this->writer()->variantsBySku([]));
+
+        Http::assertNothingSent();
+    }
+
+    public function test_variants_by_sku_chunks_large_sku_lists(): void
+    {
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => [
+                'productVariants' => ['nodes' => []],
+            ]]),
+        ]);
+
+        $skus = array_map(fn (int $i) => (string) (10000000 + $i), range(1, 45));
+
+        $this->writer()->variantsBySku($skus);
+
+        Http::assertSentCount(3);
+    }
 }

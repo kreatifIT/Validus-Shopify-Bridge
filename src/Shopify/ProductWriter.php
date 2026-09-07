@@ -143,4 +143,56 @@ class ProductWriter
 
         return $state;
     }
+
+    /**
+     * Looks up existing Shopify variants by SKU directly, independent of our
+     * own product-map table. Used to adopt a catalog that already has
+     * products in Shopify from before this package was introduced (see
+     * `validus-shopify:link-existing` and `validus-shopify:diff`) - without
+     * this, a SKU that already exists but isn't mapped yet would otherwise
+     * get a duplicate product created for it on the next real sync.
+     *
+     * @param  array<int, string>  $skus
+     * @return array<string, array{id: string, price: string, productId: string, productTitle: string}> keyed by SKU
+     */
+    public function variantsBySku(array $skus): array
+    {
+        if (empty($skus)) {
+            return [];
+        }
+
+        $query = <<<'QUERY'
+            query VariantsBySku($q: String!) {
+              productVariants(first: 100, query: $q) {
+                nodes {
+                  id
+                  sku
+                  price
+                  product {
+                    id
+                    title
+                  }
+                }
+              }
+            }
+            QUERY;
+
+        $found = [];
+
+        foreach (array_chunk(array_values(array_unique($skus)), 20) as $chunk) {
+            $search = implode(' OR ', array_map(fn (string $sku) => "sku:{$sku}", $chunk));
+            $nodes = Arr::get($this->client->query($query, ['q' => $search]), 'productVariants.nodes', []);
+
+            foreach ($nodes as $node) {
+                $found[$node['sku']] = [
+                    'id' => $node['id'],
+                    'price' => $node['price'],
+                    'productId' => Arr::get($node, 'product.id', ''),
+                    'productTitle' => Arr::get($node, 'product.title', ''),
+                ];
+            }
+        }
+
+        return $found;
+    }
 }
