@@ -95,6 +95,29 @@ Schedule::command('validus-shopify:sync-products')->hourly();
 
 New variants are imported **without** inventory tracking enabled (a manual, per-variant decision in Shopify Admin). Once a variant is flipped to tracked in Shopify, subsequent syncs push `qtyInStock` for it automatically.
 
+## Adopting a Shopify catalog that already has products in it
+
+`sync-products` only ever consults its own `validus_shopify_product_map` table to decide whether a Validus product is new (create) or already known (update) - it never checks Shopify itself. If the store already has products in it from before this package was introduced (imported manually, or by a previous process) and they happen to share a SKU with a Validus product, the first real sync would create a **duplicate** product for every one of them instead of updating the existing one, since nothing is mapped yet.
+
+Before running the first real sync on such a store, check for this and link any matches:
+
+```bash
+# See what a real sync would do beyond sync-products --dry-run: which SKUs already
+# exist in Shopify but aren't linked yet (would become duplicates), which are
+# genuinely new, and which already-linked variants have a price different from Validus:
+php artisan validus-shopify:diff
+
+# Also list variants that are linked and unchanged:
+php artisan validus-shopify:diff --all
+
+# Link every Validus product to its already-existing Shopify variant by matching SKU
+# (writes to validus_shopify_product_map only, never touches Shopify itself):
+php artisan validus-shopify:link-existing --dry-run
+php artisan validus-shopify:link-existing
+```
+
+Run `link-existing` once per store as part of onboarding it onto this package (a store with no pre-existing catalog can skip it - `sync-products` alone is enough). `diff` is safe to run at any time afterwards too, e.g. to spot-check for price drift.
+
 ## Known open items
 
 These are deliberately left unhandled rather than guessed at - the corresponding code path throws instead of sending incomplete data:

@@ -4,6 +4,8 @@ namespace Kreatif\ValidusShopifyBridge;
 
 use Illuminate\Support\ServiceProvider;
 use Kreatif\ValidusShopifyBridge\Clients\ValidusClient;
+use Kreatif\ValidusShopifyBridge\Console\Commands\DiffValidusCatalog;
+use Kreatif\ValidusShopifyBridge\Console\Commands\LinkExistingShopifyVariants;
 use Kreatif\ValidusShopifyBridge\Console\Commands\SyncValidusProducts;
 use Kreatif\ValidusShopifyBridge\Grouping\ProductCodeGroupingStrategy;
 use Kreatif\ValidusShopifyBridge\Grouping\VariantGroupingStrategy;
@@ -64,7 +66,11 @@ class ValidusShopifyServiceProvider extends ServiceProvider
         $this->loadRoutesFrom(__DIR__.'/../routes/webhooks.php');
 
         if ($this->app->runningInConsole()) {
-            $this->commands([SyncValidusProducts::class]);
+            $this->commands([
+                SyncValidusProducts::class,
+                DiffValidusCatalog::class,
+                LinkExistingShopifyVariants::class,
+            ]);
         }
     }
 }
