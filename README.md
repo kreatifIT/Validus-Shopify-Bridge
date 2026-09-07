@@ -75,6 +75,12 @@ POST https://your-app.example/webhook/order
 
 The route is protected by an HMAC signature check against `SHOPIFY_WEBHOOK_SECRET` (see `Kreatif\ValidusShopifyBridge\Http\Middleware\VerifyShopifyWebhookSignature`).
 
+### If an order export fails
+
+`ExportOrderToValidusJob` retries a failed export up to 5 times with a backoff (10s, 30s, 60s, 5m, 15m) - but that only actually happens on a real queue with a worker running (`database`, `redis`, ...). On `QUEUE_CONNECTION=sync` (Laravel's default, and a common choice for a small store), there is no queue to retry from: the job runs once, synchronously, inside the webhook request, and a failure is returned to Shopify as a non-2xx response - Shopify's own webhook redelivery becomes the only retry mechanism at that point. Point `QUEUE_CONNECTION` at a real driver with a worker process if you want this package's own retry/backoff to do anything.
+
+Once retries (real or Shopify's) are exhausted, a `Kreatif\ValidusShopifyBridge\Events\OrderExportFailed` event fires, carrying the Shopify order ID, the human-readable order number (e.g. `#A2`), and the exception. As with `ProductSyncGroupFailed`, the package doesn't notify anyone itself - bind a listener in the consuming app if you want an alert (email, Slack, ...).
+
 ## Running the product sync
 
 ```bash
