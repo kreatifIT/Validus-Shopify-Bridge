@@ -189,4 +189,195 @@ class ProductSyncServiceTest extends TestCase
         $this->assertSame('update', $result['preview'][0]['action']);
         $this->assertSame('gid://shopify/Product/1', $result['preview'][0]['shopifyProductId']);
     }
+
+    protected function baseVariantMapRows(): void
+    {
+        ProductMap::query()->create([
+            'validus_id' => '1001',
+            'validus_code' => '56070025',
+            'shopify_product_id' => 'gid://shopify/Product/1',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/1',
+        ]);
+        ProductMap::query()->create([
+            'validus_id' => '1002',
+            'validus_code' => '56090125',
+            'shopify_product_id' => 'gid://shopify/Product/1',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/2',
+        ]);
+    }
+
+    protected function stubNormalGroupUpsert(\Mockery\MockInterface $writer): void
+    {
+        $writer->shouldReceive('upsertProduct')->andReturn([
+            'productId' => 'gid://shopify/Product/1',
+            'variants' => [
+                ['id' => 'gid://shopify/ProductVariant/1', 'sku' => '56070025'],
+                ['id' => 'gid://shopify/ProductVariant/2', 'sku' => '56090125'],
+            ],
+        ]);
+    }
+
+    public function test_it_deactivates_and_archives_a_product_whose_only_variant_is_gone_from_validus(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+        $this->baseVariantMapRows();
+
+        // Discontinued: not in the Validus fixture, was the only variant mapped to this Shopify product.
+        ProductMap::query()->create([
+            'validus_id' => '9999',
+            'validus_code' => '77777777',
+            'shopify_product_id' => 'gid://shopify/Product/9',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/9',
+        ]);
+
+        $writer = Mockery::mock(ProductWriter::class);
+        $this->stubNormalGroupUpsert($writer);
+        $writer->shouldReceive('variantInventoryState')->andReturn([
+            'gid://shopify/ProductVariant/9' => ['inventoryItemId' => 'gid://shopify/InventoryItem/9', 'tracked' => false],
+        ]);
+        $writer->shouldReceive('setInventoryTracked')->once()->with('gid://shopify/InventoryItem/9');
+        $writer->shouldReceive('setInventoryQuantity')->once()->with('gid://shopify/InventoryItem/9', 'gid://shopify/Location/1', 0);
+        $writer->shouldReceive('setVariantInventoryPolicy')->once()->with('gid://shopify/Product/9', 'gid://shopify/ProductVariant/9', 'DENY');
+        $writer->shouldReceive('setProductStatus')->once()->with('gid://shopify/Product/9', 'ARCHIVED');
+
+        $result = $this->service($writer)->run();
+
+        $this->assertSame(1, $result['deactivation']['variants']);
+        $this->assertSame(1, $result['deactivation']['products']);
+    }
+
+    public function test_it_deactivates_a_variant_without_archiving_the_product_when_siblings_remain(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+        $this->baseVariantMapRows();
+
+        // A third variant that used to share the SAME Shopify product with 1001/1002, but Validus dropped it.
+        ProductMap::query()->create([
+            'validus_id' => '1003',
+            'validus_code' => '56100123',
+            'shopify_product_id' => 'gid://shopify/Product/1',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/3',
+        ]);
+
+        $writer = Mockery::mock(ProductWriter::class);
+        $this->stubNormalGroupUpsert($writer);
+        $writer->shouldReceive('variantInventoryState')->andReturn([
+            'gid://shopify/ProductVariant/3' => ['inventoryItemId' => 'gid://shopify/InventoryItem/3', 'tracked' => true],
+        ]);
+        $writer->shouldReceive('setInventoryQuantity')->once()->with('gid://shopify/InventoryItem/3', 'gid://shopify/Location/1', 0);
+        $writer->shouldReceive('setVariantInventoryPolicy')->once()->with('gid://shopify/Product/1', 'gid://shopify/ProductVariant/3', 'DENY');
+        $writer->shouldNotReceive('setInventoryTracked'); // already tracked
+        $writer->shouldNotReceive('setProductStatus'); // siblings 1001/1002 are still current
+
+        $result = $this->service($writer)->run();
+
+        $this->assertSame(1, $result['deactivation']['variants']);
+        $this->assertSame(0, $result['deactivation']['products']);
+    }
+
+    public function test_deactivation_dry_run_does_not_call_shopify(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+        $this->baseVariantMapRows(); // keeps the removed share under the safety threshold
+
+        ProductMap::query()->create([
+            'validus_id' => '9999',
+            'validus_code' => '77777777',
+            'shopify_product_id' => 'gid://shopify/Product/9',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/9',
+        ]);
+
+        $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldNotReceive('upsertProduct');
+        $writer->shouldNotReceive('setInventoryTracked');
+        $writer->shouldNotReceive('setInventoryQuantity');
+        $writer->shouldNotReceive('setVariantInventoryPolicy');
+        $writer->shouldNotReceive('setProductStatus');
+
+        $result = $this->service($writer)->run(dryRun: true);
+
+        $this->assertSame(1, $result['deactivation']['variants']);
+        $this->assertSame(1, $result['deactivation']['products']);
+    }
+
+    public function test_deactivation_is_skipped_when_removed_share_exceeds_the_safety_threshold(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+
+        // 3 mapped products, none of them in the 2-product Validus fixture -> 100% removed, above the 50% default.
+        foreach (['9001', '9002', '9003'] as $id) {
+            ProductMap::query()->create([
+                'validus_id' => $id,
+                'validus_code' => $id,
+                'shopify_product_id' => "gid://shopify/Product/{$id}",
+                'shopify_variant_id' => "gid://shopify/ProductVariant/{$id}",
+            ]);
+        }
+
+        $writer = Mockery::mock(ProductWriter::class);
+        $this->stubNormalGroupUpsert($writer);
+        $writer->shouldReceive('variantInventoryState')->andReturn([]);
+        $writer->shouldNotReceive('setInventoryTracked');
+        $writer->shouldNotReceive('setVariantInventoryPolicy');
+        $writer->shouldNotReceive('setProductStatus');
+
+        $result = $this->service($writer)->run();
+
+        $this->assertSame('safety-threshold', $result['deactivation']['skipped']);
+        $this->assertSame(3, $result['deactivation']['variants']);
+        $this->assertSame(0, $result['deactivation']['products']);
+    }
+
+    public function test_deactivation_is_skipped_when_disabled_via_config(): void
+    {
+        config(['validus-shopify.deactivation.enabled' => false]);
+
+        $this->fakeValidusProductsEndpoint();
+
+        ProductMap::query()->create([
+            'validus_id' => '9999',
+            'validus_code' => '77777777',
+            'shopify_product_id' => 'gid://shopify/Product/9',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/9',
+        ]);
+
+        $writer = Mockery::mock(ProductWriter::class);
+        $this->stubNormalGroupUpsert($writer);
+        $writer->shouldReceive('variantInventoryState')->andReturn([]);
+        $writer->shouldNotReceive('setProductStatus');
+
+        $result = $this->service($writer)->run();
+
+        $this->assertSame('disabled', $result['deactivation']['skipped']);
+    }
+
+    public function test_deactivation_is_skipped_without_a_location_id(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+
+        ProductMap::query()->create([
+            'validus_id' => '9999',
+            'validus_code' => '77777777',
+            'shopify_product_id' => 'gid://shopify/Product/9',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/9',
+        ]);
+
+        $writer = Mockery::mock(ProductWriter::class);
+        $this->stubNormalGroupUpsert($writer);
+        $writer->shouldReceive('variantInventoryState')->andReturn([]);
+        $writer->shouldNotReceive('setProductStatus');
+
+        $service = new ProductSyncService(
+            validus: new ValidusClient('https://validus.test/ecommerce_bridge', 'test-api-key'),
+            shopify: $writer,
+            grouping: new ProductCodeGroupingStrategy,
+            locationId: null,
+            pricesIncludeTax: false,
+            trackNewVariants: false,
+        );
+
+        $result = $service->run();
+
+        $this->assertSame('disabled', $result['deactivation']['skipped']);
+    }
 }

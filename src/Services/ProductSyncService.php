@@ -22,26 +22,112 @@ class ProductSyncService
     ) {}
 
     /**
-     * @return array{groups: int, variants: int, dryRun: bool, preview: array<int, array<string, mixed>>}
+     * @return array{groups: int, variants: int, dryRun: bool, preview: array<int, array<string, mixed>>, deactivation: array{skipped: ?string, variants: int, products: int}}
      */
     public function run(bool $dryRun = false): array
     {
-        $groups = collect($this->validus->getProducts())
+        $validusProducts = $this->validus->getProducts();
+
+        $groups = collect($validusProducts)
             ->groupBy(fn (array $product) => $this->grouping->groupKey($product));
 
         $variantCount = 0;
         $preview = [];
 
-        foreach ($groups as $groupKey => $validusProducts) {
-            $groupPreview = $this->syncGroup((string) $groupKey, $validusProducts->all(), $dryRun);
-            $variantCount += $validusProducts->count();
+        foreach ($groups as $groupKey => $groupProducts) {
+            $groupPreview = $this->syncGroup((string) $groupKey, $groupProducts->all(), $dryRun);
+            $variantCount += $groupProducts->count();
 
             if ($dryRun) {
                 $preview[] = $groupPreview;
             }
         }
 
-        return ['groups' => $groups->count(), 'variants' => $variantCount, 'dryRun' => $dryRun, 'preview' => $preview];
+        $currentValidusIds = collect($validusProducts)->map(fn (array $product) => (string) $product['id'])->all();
+        $deactivation = $this->deactivateRemoved($currentValidusIds, $dryRun);
+
+        return [
+            'groups' => $groups->count(),
+            'variants' => $variantCount,
+            'dryRun' => $dryRun,
+            'preview' => $preview,
+            'deactivation' => $deactivation,
+        ];
+    }
+
+    /**
+     * Deactivates every already-linked variant whose Validus product has
+     * disappeared from the catalog entirely, and archives the Shopify
+     * product too once every variant mapped to it is gone - see the
+     * "deactivation" config block for the guardrails (can be turned off
+     * entirely, and skips itself if the removed share looks too large to be
+     * a real batch of discontinuations rather than a bad Validus response).
+     *
+     * @param  array<int, string>  $currentValidusIds
+     * @return array{skipped: ?string, variants: int, products: int}
+     */
+    protected function deactivateRemoved(array $currentValidusIds, bool $dryRun): array
+    {
+        if (! config('validus-shopify.deactivation.enabled', true) || ! $this->locationId) {
+            return ['skipped' => 'disabled', 'variants' => 0, 'products' => 0];
+        }
+
+        $staleMaps = ProductMap::query()->whereNotIn('validus_id', $currentValidusIds)->get();
+
+        if ($staleMaps->isEmpty()) {
+            return ['skipped' => null, 'variants' => 0, 'products' => 0];
+        }
+
+        $totalMapped = ProductMap::query()->count();
+        $removedRatio = $totalMapped > 0 ? $staleMaps->count() / $totalMapped : 0;
+        $maxRatio = (float) config('validus-shopify.deactivation.max_removed_ratio', 0.5);
+
+        if (count($currentValidusIds) === 0 || $removedRatio > $maxRatio) {
+            return ['skipped' => 'safety-threshold', 'variants' => $staleMaps->count(), 'products' => 0];
+        }
+
+        $deactivatedVariants = 0;
+        $archivedProducts = 0;
+
+        foreach ($staleMaps->groupBy('shopify_product_id') as $shopifyProductId => $staleForProduct) {
+            foreach ($staleForProduct as $map) {
+                if (! $dryRun) {
+                    $this->deactivateVariant($map);
+                }
+
+                $deactivatedVariants++;
+            }
+
+            $totalForProduct = ProductMap::query()->where('shopify_product_id', $shopifyProductId)->count();
+            $allVariantsRemoved = $totalForProduct > 0 && $staleForProduct->count() === $totalForProduct;
+
+            if ($allVariantsRemoved) {
+                if (! $dryRun) {
+                    $this->shopify->setProductStatus($shopifyProductId, 'ARCHIVED');
+                }
+
+                $archivedProducts++;
+            }
+        }
+
+        return ['skipped' => null, 'variants' => $deactivatedVariants, 'products' => $archivedProducts];
+    }
+
+    protected function deactivateVariant(ProductMap $map): void
+    {
+        $state = $this->shopify->variantInventoryState([$map->shopify_variant_id])[$map->shopify_variant_id] ?? null;
+        $inventoryItemId = $state['inventoryItemId'] ?? null;
+
+        if (! $inventoryItemId) {
+            return;
+        }
+
+        if (! ($state['tracked'] ?? false)) {
+            $this->shopify->setInventoryTracked($inventoryItemId);
+        }
+
+        $this->shopify->setInventoryQuantity($inventoryItemId, $this->locationId, 0);
+        $this->shopify->setVariantInventoryPolicy($map->shopify_product_id, $map->shopify_variant_id, 'DENY');
     }
 
     /**

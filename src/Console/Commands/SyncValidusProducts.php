@@ -23,9 +23,30 @@ class SyncValidusProducts extends Command
             $this->renderPreview($result['preview']);
         }
 
+        $this->renderDeactivation($result['deactivation'], $dryRun);
+
         $this->info("Done. {$result['groups']} Shopify product(s), {$result['variants']} variant(s) processed.");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * @param  array{skipped: ?string, variants: int, products: int}  $deactivation
+     */
+    protected function renderDeactivation(array $deactivation, bool $dryRun): void
+    {
+        if ($deactivation['skipped'] === 'safety-threshold') {
+            $this->warn("Skipped deactivating {$deactivation['variants']} variant(s) - removed share exceeded validus-shopify.deactivation.max_removed_ratio. This usually means Validus returned an incomplete catalog rather than {$deactivation['variants']} real discontinuations; check before running validus-shopify:diff manually.");
+
+            return;
+        }
+
+        if ($deactivation['skipped'] || $deactivation['variants'] === 0) {
+            return;
+        }
+
+        $verb = $dryRun ? 'would deactivate' : 'deactivated';
+        $this->line("{$verb} {$deactivation['variants']} variant(s) no longer in Validus".($deactivation['products'] > 0 ? ", archived {$deactivation['products']} product(s) with no remaining active variant" : '').'.');
     }
 
     /**

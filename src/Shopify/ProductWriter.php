@@ -109,6 +109,82 @@ class ProductWriter
     }
 
     /**
+     * Turns on inventory tracking for an item that isn't tracked yet. Needed
+     * before deactivateVariant() can rely on inventoryPolicy/stock to make a
+     * normally-untracked variant unpurchasable - Shopify only enforces
+     * "deny overselling" for tracked items, an untracked one is always
+     * purchasable regardless of inventoryPolicy or quantity.
+     */
+    public function setInventoryTracked(string $inventoryItemId): void
+    {
+        $query = <<<'QUERY'
+            mutation InventoryItemUpdate($id: ID!, $input: InventoryItemUpdateInput!) {
+              inventoryItemUpdate(id: $id, input: $input) {
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+            QUERY;
+
+        $data = $this->client->query($query, ['id' => $inventoryItemId, 'input' => ['tracked' => true]]);
+
+        if ($errors = Arr::get($data, 'inventoryItemUpdate.userErrors')) {
+            throw ShopifyApiException::userErrors('inventoryItemUpdate', $errors);
+        }
+    }
+
+    /**
+     * @param  'DENY'|'CONTINUE'  $policy
+     */
+    public function setVariantInventoryPolicy(string $productId, string $variantId, string $policy): void
+    {
+        $query = <<<'QUERY'
+            mutation ProductVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+              productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+            QUERY;
+
+        $data = $this->client->query($query, [
+            'productId' => $productId,
+            'variants' => [['id' => $variantId, 'inventoryPolicy' => $policy]],
+        ]);
+
+        if ($errors = Arr::get($data, 'productVariantsBulkUpdate.userErrors')) {
+            throw ShopifyApiException::userErrors('productVariantsBulkUpdate', $errors);
+        }
+    }
+
+    /**
+     * @param  'ACTIVE'|'ARCHIVED'|'DRAFT'  $status
+     */
+    public function setProductStatus(string $productId, string $status): void
+    {
+        $query = <<<'QUERY'
+            mutation ProductUpdate($input: ProductInput!) {
+              productUpdate(input: $input) {
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+            QUERY;
+
+        $data = $this->client->query($query, ['input' => ['id' => $productId, 'status' => $status]]);
+
+        if ($errors = Arr::get($data, 'productUpdate.userErrors')) {
+            throw ShopifyApiException::userErrors('productUpdate', $errors);
+        }
+    }
+
+    /**
      * @param  array<int, string>  $variantIds
      * @return array<string, array{inventoryItemId: ?string, tracked: bool}> keyed by variant id
      */

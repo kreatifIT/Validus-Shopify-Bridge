@@ -93,6 +93,31 @@ Schedule it in `routes/console.php` or `bootstrap/app.php` if it should run auto
 Schedule::command('validus-shopify:sync-products')->hourly();
 ```
 
+### Deactivating products Validus stops listing
+
+Every real (non-dry-run) sync also checks already-linked variants against the current Validus catalog. A variant whose Validus product has disappeared entirely (discontinued, or removed by mistake) is made unavailable to buy:
+
+- inventory tracking is turned on if it wasn't already (an untracked variant is always purchasable no matter what, so this is required for the next two steps to actually do anything),
+- stock is set to 0,
+- `inventoryPolicy` is set to `DENY` so it can't be oversold in the meantime.
+
+If that was the *only* Shopify variant still mapped to a given product, the whole product is also set to `ARCHIVED`. A product with other, still-current variants (e.g. a different vintage) is left alone - only the specific removed variant is touched.
+
+Nothing is deleted, and `sync-products` never un-links a `validus_shopify_product_map` row on its own: if Validus starts listing the product again and it's synced, the existing mapping is reused (updated, not duplicated). The variant's inventory policy/stock is **not** automatically restored on reactivation though - flip that back manually in Shopify Admin once confirmed.
+
+This is controlled by the `deactivation` config block:
+
+```php
+'deactivation' => [
+    'enabled' => env('VALIDUS_SHOPIFY_AUTO_DEACTIVATE', true),
+    'max_removed_ratio' => (float) env('VALIDUS_SHOPIFY_MAX_REMOVED_RATIO', 0.5),
+],
+```
+
+`max_removed_ratio` is a safety net: if the share of already-linked products that would be deactivated in one run exceeds it, the whole deactivation step is skipped for that run (the rest of the sync still happens normally) and a warning is logged instead. This is meant to catch a bad or partial Validus response - an API hiccup that doesn't throw, or a temporarily incomplete price list - being mistaken for a mass discontinuation; a real, large batch of intentional discontinuations would need `max_removed_ratio` raised (or the deactivation step run manually after reviewing `validus-shopify:diff`). Requires `shopify.location_id` to be set - silently does nothing without it, same as inventory quantity syncing.
+
+`validus-shopify:diff` reports the same "in Shopify but missing from Validus" set read-only, without writing anything - useful to check what a sync *would* deactivate ahead of time, or to audit it independent of the schedule.
+
 New variants are imported **without** inventory tracking enabled (a manual, per-variant decision in Shopify Admin). Once a variant is flipped to tracked in Shopify, subsequent syncs push `qtyInStock` for it automatically.
 
 ## Adopting a Shopify catalog that already has products in it
