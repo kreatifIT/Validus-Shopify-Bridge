@@ -90,7 +90,7 @@ class DiffValidusCatalogTest extends TestCase
 
         $this->artisan('validus-shopify:diff')
             ->expectsOutputToContain('FOUND IN SHOPIFY BUT NOT LINKED')
-            ->expectsOutputToContain('Summary: 1 found but unlinked, 1 truly new, 1 linked with a price change, 1 linked and unchanged (4 variants total).')
+            ->expectsOutputToContain('Summary: 1 found but unlinked, 1 truly new, 1 linked with a price change, 1 linked and unchanged, 0 linked but missing from Validus (4 Validus variant(s) total).')
             ->assertExitCode(0);
     }
 
@@ -124,6 +124,45 @@ class DiffValidusCatalogTest extends TestCase
 
         $this->artisan('validus-shopify:diff', ['--all' => true])
             ->expectsOutputToContain('UNCHANGED (already linked) (1)')
+            ->assertExitCode(0);
+    }
+
+    public function test_it_flags_a_mapped_product_validus_no_longer_returns(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+
+        // Was linked to a Validus product that has since disappeared from the
+        // ERP catalog entirely (discontinued, or removed by mistake).
+        ProductMap::query()->create([
+            'validus_id' => '9999',
+            'validus_code' => '77777777',
+            'shopify_product_id' => 'gid://shopify/Product/9',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/9',
+        ]);
+
+        $this->mock(ProductWriter::class, function ($mock) {
+            $mock->shouldReceive('variantsBySku')
+                ->once()
+                ->with(['56070025', '11111111', '22222222', '33333333'])
+                ->andReturn([]);
+
+            $mock->shouldReceive('variantsBySku')
+                ->once()
+                ->with(['77777777'])
+                ->andReturn([
+                    '77777777' => [
+                        'id' => 'gid://shopify/ProductVariant/9',
+                        'price' => '15.00',
+                        'productId' => 'gid://shopify/Product/9',
+                        'productTitle' => 'Discontinued Wine',
+                    ],
+                ]);
+        });
+
+        $this->artisan('validus-shopify:diff')
+            ->expectsOutputToContain('IN SHOPIFY BUT MISSING FROM VALIDUS')
+            ->expectsOutputToContain('Discontinued Wine')
+            ->expectsOutputToContain('1 linked but missing from Validus')
             ->assertExitCode(0);
     }
 }

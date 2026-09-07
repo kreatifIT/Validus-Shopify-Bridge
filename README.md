@@ -116,7 +116,7 @@ php artisan validus-shopify:link-existing --dry-run
 php artisan validus-shopify:link-existing
 ```
 
-Run `link-existing` once per store as part of onboarding it onto this package (a store with no pre-existing catalog can skip it - `sync-products` alone is enough). `diff` is safe to run at any time afterwards too, e.g. to spot-check for price drift.
+Run `link-existing` once per store as part of onboarding it onto this package (a store with no pre-existing catalog can skip it - `sync-products` alone is enough). `diff` is safe to run at any time afterwards too, e.g. to spot-check for price drift or for a `diff`-listed product that Validus stopped returning entirely (`sync-products` only ever adds/updates a mapping, never removes one, so a discontinued product stays untouched in Shopify until someone acts on it manually).
 
 ## Known open items
 

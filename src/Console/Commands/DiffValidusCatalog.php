@@ -20,6 +20,13 @@ use Kreatif\ValidusShopifyBridge\Shopify\ProductWriter;
  *   `validus-shopify:link-existing` to fix this before syncing for real)
  * - a price difference between what's currently in Shopify and what
  *   Validus would write on the next sync
+ * - a previously-linked product that Validus no longer returns at all
+ *   (removed/discontinued in the ERP), which sync-products has no way to
+ *   detect since it only ever adds/updates, never removes, mapped products
+ *
+ * That last check is necessarily scoped to already-linked products (the
+ * validus_shopify_product_map table) - it can't tell a Shopify product this
+ * package never touched apart from one Validus stopped listing.
  */
 class DiffValidusCatalog extends Command
 {
@@ -87,10 +94,18 @@ class DiffValidusCatalog extends Command
             }
         }
 
+        $removed = $this->findRemovedFromValidus($shopify, $rows);
+
         if (! empty($conflicts)) {
             $this->newLine();
             $this->error('FOUND IN SHOPIFY BUT NOT LINKED - a real sync would create duplicate products for these. Run validus-shopify:link-existing first.');
             $this->printGroup(null, $conflicts, withDiff: true, withShopifyProduct: true);
+        }
+
+        if (! empty($removed)) {
+            $this->newLine();
+            $this->error('IN SHOPIFY BUT MISSING FROM VALIDUS - previously linked, but Validus no longer lists this product. sync-products never removes a mapping on its own, check whether it was discontinued on purpose.');
+            $this->printGroup(null, $removed, withShopifyProduct: true);
         }
 
         $this->printGroup('NEW (no SKU match in Shopify)', $new);
@@ -102,15 +117,52 @@ class DiffValidusCatalog extends Command
 
         $this->newLine();
         $this->info(sprintf(
-            'Summary: %d found but unlinked, %d truly new, %d linked with a price change, %d linked and unchanged (%d variants total).',
+            'Summary: %d found but unlinked, %d truly new, %d linked with a price change, %d linked and unchanged, %d linked but missing from Validus (%d Validus variant(s) total).',
             count($conflicts),
             count($new),
             count($changed),
             count($unchanged),
+            count($removed),
             count($rows),
         ));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Already-linked products (validus_shopify_product_map) whose validus_id
+     * Validus no longer returns at all - the ERP dropped the product but
+     * nothing here ever un-links or deactivates it automatically.
+     *
+     * @param  array<string, array<string, mixed>>  $currentRows  Keyed by SKU, as built in handle().
+     * @return array<int, array<string, mixed>>
+     */
+    protected function findRemovedFromValidus(ProductWriter $shopify, array $currentRows): array
+    {
+        $staleMaps = ProductMap::query()
+            ->whereNotIn('validus_id', array_column($currentRows, 'validus_id'))
+            ->get();
+
+        if ($staleMaps->isEmpty()) {
+            return [];
+        }
+
+        $matches = $shopify->variantsBySku($staleMaps->pluck('validus_code')->all());
+
+        return $staleMaps->map(function (ProductMap $map) use ($matches) {
+            $match = $matches[$map->validus_code] ?? null;
+
+            return [
+                'title' => $match['productTitle'] ?? '(not found in Shopify either - product may have been deleted there too)',
+                'sku' => $map->validus_code,
+                'vintage' => '',
+                'format' => '',
+                'validus_price' => '-',
+                'shopify_price' => $match['price'] ?? null,
+                'shopify_product' => $match['productTitle'] ?? '-',
+                'shopify_product_id' => $match['productId'] ?? $map->shopify_product_id,
+            ];
+        })->all();
     }
 
     /**
