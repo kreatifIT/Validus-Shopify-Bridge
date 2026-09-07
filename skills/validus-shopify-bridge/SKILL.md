@@ -38,6 +38,10 @@ Check the response body first - Validus returns descriptive JSON (e.g. `"Listino
 
 `VALIDUS_SHOPIFY_WEBHOOK_SECRET` must be the Shopify app's **Client secret** (API credentials page), not the `SHOPIFY_ADMIN_TOKEN` (`shpat_...`) - easy to paste the wrong one since both live on/near the same Shopify Admin screen. A webhook registered via Shopify's legacy *Settings → Notifications* page is signed with the same Client secret as an app-scoped webhook subscription, so either registration method works - just don't set up both for the same topic, or the endpoint gets each order delivered twice.
 
+## "What did the last import actually do?"
+
+Check the `validus-shopify` log channel (`storage/logs/validus-shopify-*.log`, daily-rotated) before assuming nothing was logged - it's registered automatically by the package's service provider, not something a consuming app has to set up. One line per product group synced/skipped plus a per-run summary; console output from a scheduled run is otherwise gone the moment the command exits.
+
 ## Reading a `sync-products` run
 
 - `N new Shopify product(s) would be created, M existing product(s) would be updated` (dry-run) / `Done. N Shopify product(s), M variant(s) processed.` (real) only count **successful** groups.

@@ -3,6 +3,7 @@
 namespace Kreatif\ValidusShopifyBridge\Services;
 
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Log;
 use Kreatif\ValidusShopifyBridge\Clients\ValidusClient;
 use Kreatif\ValidusShopifyBridge\Events\ProductSyncGroupFailed;
 use Kreatif\ValidusShopifyBridge\Grouping\VariantGroupingStrategy;
@@ -53,16 +54,43 @@ class ProductSyncService
                 if ($dryRun) {
                     $preview[] = $groupPreview;
                 }
+
+                Log::channel('validus-shopify')->info($dryRun ? 'Would sync product group' : 'Synced product group', [
+                    'dryRun' => $dryRun,
+                    'action' => $groupPreview['action'],
+                    'groupKey' => $groupPreview['groupKey'],
+                    'title' => $groupPreview['title'],
+                    'shopifyProductId' => $groupPreview['shopifyProductId'],
+                    'variants' => $groupPreview['variants'],
+                ]);
             } catch (Throwable $e) {
                 $title = $groupProducts->first()['name'] ?? (string) $groupKey;
                 $failures[] = ['groupKey' => (string) $groupKey, 'title' => $title, 'message' => $e->getMessage()];
                 report($e);
                 event(new ProductSyncGroupFailed((string) $groupKey, $title, $e));
+
+                Log::channel('validus-shopify')->warning('Product group sync failed', [
+                    'dryRun' => $dryRun,
+                    'groupKey' => (string) $groupKey,
+                    'title' => $title,
+                    'message' => $e->getMessage(),
+                ]);
             }
         }
 
         $currentValidusIds = collect($validusProducts)->map(fn (array $product) => (string) $product['id'])->all();
         $deactivation = $this->deactivateRemoved($currentValidusIds, $dryRun);
+
+        if ($deactivation['variants'] > 0 || $deactivation['skipped']) {
+            Log::channel('validus-shopify')->info('Deactivation step result', [...$deactivation, 'dryRun' => $dryRun]);
+        }
+
+        Log::channel('validus-shopify')->info('Sync run finished', [
+            'dryRun' => $dryRun,
+            'groups' => $successfulGroups,
+            'variants' => $variantCount,
+            'failures' => count($failures),
+        ]);
 
         return [
             'groups' => $successfulGroups,

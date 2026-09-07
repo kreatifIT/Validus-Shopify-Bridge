@@ -120,6 +120,19 @@ This is controlled by the `deactivation` config block:
 
 New variants are imported **without** inventory tracking enabled (a manual, per-variant decision in Shopify Admin). Once a variant is flipped to tracked in Shopify, subsequent syncs push `qtyInStock` for it automatically.
 
+### Logging
+
+Every `sync-products` run (dry or real) writes to a `validus-shopify` log channel, registered automatically (no `config/logging.php` changes needed) using Laravel's `daily` driver - `storage/logs/validus-shopify-YYYY-MM-DD.log`, one line per product group (created/updated/skipped, with the SKU/vintage/format/price it wrote) plus a run summary and, when it happens, the deactivation result. This is what you'd tail to answer "what did the last import actually do" - the console output itself is gone the moment the (usually scheduled, unattended) command finishes.
+
+Rotation is handled by the `daily` driver itself (old files past the retention window are deleted automatically, no external logrotate needed):
+
+```env
+VALIDUS_SHOPIFY_LOG_LEVEL=info   # default
+VALIDUS_SHOPIFY_LOG_DAYS=30      # default
+```
+
+Define your own `logging.channels.validus-shopify` in the consuming app's own config if you'd rather ship these logs somewhere else (Papertrail, Slack, etc.) - the package only registers this default when the app hasn't already defined that channel itself.
+
 ### A failing product doesn't stop the rest of the sync
 
 Each Validus product group (one Shopify product, e.g. all vintages/formats of one wine) is synced independently. If a group fails - most commonly Shopify rejecting a `productSet` call because two distinct Validus products collide on the same option values, see [Troubleshooting](#troubleshooting) below - that one group is skipped, `sync-products` prints it and exits non-zero, but every other group and the deactivation step still run. A `Kreatif\ValidusShopifyBridge\Events\ProductSyncGroupFailed` event fires for each failure (carrying the group key, product title and the exception) - the package doesn't send any notification itself, so bind a listener in the consuming app if you want one (email, Slack, etc.).

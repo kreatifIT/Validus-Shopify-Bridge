@@ -4,6 +4,7 @@ namespace Kreatif\ValidusShopifyBridge\Tests\Feature;
 
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Kreatif\ValidusShopifyBridge\Clients\ValidusClient;
 use Kreatif\ValidusShopifyBridge\Events\ProductSyncGroupFailed;
 use Kreatif\ValidusShopifyBridge\Exceptions\ShopifyApiException;
@@ -325,6 +326,26 @@ class ProductSyncServiceTest extends TestCase
                 ['id' => 'gid://shopify/ProductVariant/2', 'sku' => '56090125'],
             ],
         ]);
+    }
+
+    public function test_it_logs_a_synced_group_and_the_run_summary_to_the_validus_shopify_channel(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+
+        $logger = Mockery::mock(\Psr\Log\LoggerInterface::class);
+        $logger->shouldReceive('info')->once()->with('Synced product group', Mockery::on(
+            fn (array $context) => $context['groupKey'] === '56' && $context['action'] === 'create'
+        ));
+        $logger->shouldReceive('info')->once()->with('Sync run finished', Mockery::on(
+            fn (array $context) => $context['groups'] === 1 && $context['failures'] === 0
+        ));
+        Log::partialMock()->shouldReceive('channel')->with('validus-shopify')->andReturn($logger);
+
+        $writer = Mockery::mock(ProductWriter::class);
+        $this->stubNormalGroupUpsert($writer);
+        $writer->shouldReceive('variantInventoryState')->andReturn([]);
+
+        $this->service($writer)->run();
     }
 
     public function test_it_deactivates_and_archives_a_product_whose_only_variant_is_gone_from_validus(): void
