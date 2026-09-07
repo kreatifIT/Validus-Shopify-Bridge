@@ -2,11 +2,14 @@
 
 namespace Kreatif\ValidusShopifyBridge\Tests\Feature;
 
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Kreatif\ValidusShopifyBridge\Events\OrderExportFailed;
 use Kreatif\ValidusShopifyBridge\Jobs\ExportOrderToValidusJob;
 use Kreatif\ValidusShopifyBridge\Models\ExportedOrder;
 use Kreatif\ValidusShopifyBridge\Models\ProductMap;
 use Kreatif\ValidusShopifyBridge\Tests\TestCase;
+use RuntimeException;
 
 class ExportOrderToValidusJobTest extends TestCase
 {
@@ -60,5 +63,16 @@ class ExportOrderToValidusJobTest extends TestCase
         );
 
         Http::assertNothingSent();
+    }
+
+    public function test_it_fires_an_order_export_failed_event_carrying_the_order_number(): void
+    {
+        Event::fake();
+
+        (new ExportOrderToValidusJob($this->order()))->failed(new RuntimeException('boom'));
+
+        Event::assertDispatched(OrderExportFailed::class, fn (OrderExportFailed $event) => $event->shopifyOrderId === '5551234'
+            && $event->orderNumber === '#A2'
+            && $event->exception->getMessage() === 'boom');
     }
 }

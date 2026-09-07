@@ -7,6 +7,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Arr;
 use Kreatif\ValidusShopifyBridge\Clients\ValidusClient;
 use Kreatif\ValidusShopifyBridge\Events\OrderExportFailed;
 use Kreatif\ValidusShopifyBridge\Models\ExportedOrder;
@@ -48,6 +49,9 @@ class ExportOrderToValidusJob implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        event(new OrderExportFailed((string) $this->shopifyOrder['id'], $exception));
+        $orderId = (string) $this->shopifyOrder['id'];
+        $orderNumber = (string) Arr::get($this->shopifyOrder, 'name', $orderId);
+
+        event(new OrderExportFailed($orderId, $orderNumber, $exception));
     }
 }

@@ -3,10 +3,13 @@
 namespace Kreatif\ValidusShopifyBridge\Services;
 
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Log;
 use Kreatif\ValidusShopifyBridge\Clients\ValidusClient;
+use Kreatif\ValidusShopifyBridge\Events\ProductSyncGroupFailed;
 use Kreatif\ValidusShopifyBridge\Grouping\VariantGroupingStrategy;
 use Kreatif\ValidusShopifyBridge\Models\ProductMap;
 use Kreatif\ValidusShopifyBridge\Shopify\ProductWriter;
+use Throwable;
 
 class ProductSyncService
 {
@@ -22,26 +25,158 @@ class ProductSyncService
     ) {}
 
     /**
-     * @return array{groups: int, variants: int, dryRun: bool, preview: array<int, array<string, mixed>>}
+     * @return array{groups: int, variants: int, dryRun: bool, preview: array<int, array<string, mixed>>, deactivation: array{skipped: ?string, variants: int, products: int}, failures: array<int, array{groupKey: string, title: string, skus: array<int, string>, message: string}>}
      */
     public function run(bool $dryRun = false): array
     {
-        $groups = collect($this->validus->getProducts())
+        $validusProducts = $this->validus->getProducts();
+
+        $groups = collect($validusProducts)
             ->groupBy(fn (array $product) => $this->grouping->groupKey($product));
 
+        $successfulGroups = 0;
         $variantCount = 0;
         $preview = [];
+        $failures = [];
 
-        foreach ($groups as $groupKey => $validusProducts) {
-            $groupPreview = $this->syncGroup((string) $groupKey, $validusProducts->all(), $dryRun);
-            $variantCount += $validusProducts->count();
+        foreach ($groups as $groupKey => $groupProducts) {
+            // A data problem specific to one product (e.g. two distinct
+            // Validus products colliding on the same vintage/format
+            // combination, which Shopify then refuses as a duplicate
+            // variant) must not stop every other, unrelated product from
+            // being synced - catch per group, keep going, and report what
+            // failed at the end instead of letting the whole command crash.
+            try {
+                $groupPreview = $this->syncGroup((string) $groupKey, $groupProducts->all(), $dryRun);
+                $successfulGroups++;
+                $variantCount += $groupProducts->count();
 
-            if ($dryRun) {
-                $preview[] = $groupPreview;
+                if ($dryRun) {
+                    $preview[] = $groupPreview;
+                }
+
+                Log::channel('validus-shopify')->info($dryRun ? 'Would sync product group' : 'Synced product group', [
+                    'dryRun' => $dryRun,
+                    'action' => $groupPreview['action'],
+                    'groupKey' => $groupPreview['groupKey'],
+                    'title' => $groupPreview['title'],
+                    'shopifyProductId' => $groupPreview['shopifyProductId'],
+                    'variants' => $groupPreview['variants'],
+                ]);
+            } catch (Throwable $e) {
+                $title = $groupProducts->first()['name'] ?? (string) $groupKey;
+                $skus = $groupProducts->map(fn (array $product) => $product['code']['code'] ?? (string) $product['id'])->all();
+                $failures[] = ['groupKey' => (string) $groupKey, 'title' => $title, 'skus' => $skus, 'message' => $e->getMessage()];
+                report($e);
+                event(new ProductSyncGroupFailed((string) $groupKey, $title, $skus, $e));
+
+                Log::channel('validus-shopify')->warning('Product group sync failed', [
+                    'dryRun' => $dryRun,
+                    'groupKey' => (string) $groupKey,
+                    'title' => $title,
+                    'skus' => $skus,
+                    'message' => $e->getMessage(),
+                ]);
             }
         }
 
-        return ['groups' => $groups->count(), 'variants' => $variantCount, 'dryRun' => $dryRun, 'preview' => $preview];
+        $currentValidusIds = collect($validusProducts)->map(fn (array $product) => (string) $product['id'])->all();
+        $deactivation = $this->deactivateRemoved($currentValidusIds, $dryRun);
+
+        if ($deactivation['variants'] > 0 || $deactivation['skipped']) {
+            Log::channel('validus-shopify')->info('Deactivation step result', [...$deactivation, 'dryRun' => $dryRun]);
+        }
+
+        Log::channel('validus-shopify')->info('Sync run finished', [
+            'dryRun' => $dryRun,
+            'groups' => $successfulGroups,
+            'variants' => $variantCount,
+            'failures' => count($failures),
+        ]);
+
+        return [
+            'groups' => $successfulGroups,
+            'variants' => $variantCount,
+            'dryRun' => $dryRun,
+            'preview' => $preview,
+            'deactivation' => $deactivation,
+            'failures' => $failures,
+        ];
+    }
+
+    /**
+     * Deactivates every already-linked variant whose Validus product has
+     * disappeared from the catalog entirely, and archives the Shopify
+     * product too once every variant mapped to it is gone - see the
+     * "deactivation" config block for the guardrails (can be turned off
+     * entirely, and skips itself if the removed share looks too large to be
+     * a real batch of discontinuations rather than a bad Validus response).
+     *
+     * @param  array<int, string>  $currentValidusIds
+     * @return array{skipped: ?string, variants: int, products: int}
+     */
+    protected function deactivateRemoved(array $currentValidusIds, bool $dryRun): array
+    {
+        if (! config('validus-shopify.deactivation.enabled', true) || ! $this->locationId) {
+            return ['skipped' => 'disabled', 'variants' => 0, 'products' => 0];
+        }
+
+        $staleMaps = ProductMap::query()->whereNotIn('validus_id', $currentValidusIds)->get();
+
+        if ($staleMaps->isEmpty()) {
+            return ['skipped' => null, 'variants' => 0, 'products' => 0];
+        }
+
+        $totalMapped = ProductMap::query()->count();
+        $removedRatio = $totalMapped > 0 ? $staleMaps->count() / $totalMapped : 0;
+        $maxRatio = (float) config('validus-shopify.deactivation.max_removed_ratio', 0.5);
+
+        if (count($currentValidusIds) === 0 || $removedRatio > $maxRatio) {
+            return ['skipped' => 'safety-threshold', 'variants' => $staleMaps->count(), 'products' => 0];
+        }
+
+        $deactivatedVariants = 0;
+        $archivedProducts = 0;
+
+        foreach ($staleMaps->groupBy('shopify_product_id') as $shopifyProductId => $staleForProduct) {
+            foreach ($staleForProduct as $map) {
+                if (! $dryRun) {
+                    $this->deactivateVariant($map);
+                }
+
+                $deactivatedVariants++;
+            }
+
+            $totalForProduct = ProductMap::query()->where('shopify_product_id', $shopifyProductId)->count();
+            $allVariantsRemoved = $totalForProduct > 0 && $staleForProduct->count() === $totalForProduct;
+
+            if ($allVariantsRemoved) {
+                if (! $dryRun) {
+                    $this->shopify->setProductStatus($shopifyProductId, 'ARCHIVED');
+                }
+
+                $archivedProducts++;
+            }
+        }
+
+        return ['skipped' => null, 'variants' => $deactivatedVariants, 'products' => $archivedProducts];
+    }
+
+    protected function deactivateVariant(ProductMap $map): void
+    {
+        $state = $this->shopify->variantInventoryState([$map->shopify_variant_id])[$map->shopify_variant_id] ?? null;
+        $inventoryItemId = $state['inventoryItemId'] ?? null;
+
+        if (! $inventoryItemId) {
+            return;
+        }
+
+        if (! ($state['tracked'] ?? false)) {
+            $this->shopify->setInventoryTracked($inventoryItemId);
+        }
+
+        $this->shopify->setInventoryQuantity($inventoryItemId, $this->locationId, 0);
+        $this->shopify->setVariantInventoryPolicy($map->shopify_product_id, $map->shopify_variant_id, 'DENY');
     }
 
     /**

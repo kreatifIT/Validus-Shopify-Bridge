@@ -100,4 +100,34 @@ return [
     */
     'track_new_variants' => env('VALIDUS_SHOPIFY_TRACK_NEW_VARIANTS', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Auto-deactivation of products Validus no longer lists
+    |--------------------------------------------------------------------------
+    |
+    | Every real sync-products run also deactivates any already-linked
+    | variant whose Validus product has disappeared from the catalog
+    | entirely (discontinued, or removed by mistake): inventory tracking is
+    | turned on if it wasn't already, stock is zeroed, and the variant's
+    | inventory policy is set to deny overselling - the product itself is
+    | archived too, but only once *every* variant mapped to it is gone.
+    | Nothing is deleted; re-adding the product to Validus and syncing again
+    | is enough to bring it back (a variant's inventory policy/stock is left
+    | as-is on reactivation, so restore that manually if it should be sold
+    | immediately again). Requires shopify.location_id to be set - silently
+    | does nothing without it, same as inventory quantity syncing.
+    |
+    */
+    'deactivation' => [
+        'enabled' => env('VALIDUS_SHOPIFY_AUTO_DEACTIVATE', true),
+
+        // Safety net for a bad/partial Validus response (e.g. an API error
+        // that doesn't throw, or a temporarily incomplete price list) being
+        // mistaken for mass discontinuation: if the share of already-linked
+        // products that would be deactivated in one run exceeds this ratio,
+        // the whole deactivation step is skipped (the rest of the sync still
+        // runs normally) rather than archiving half the catalog by accident.
+        'max_removed_ratio' => (float) env('VALIDUS_SHOPIFY_MAX_REMOVED_RATIO', 0.5),
+    ],
+
 ];

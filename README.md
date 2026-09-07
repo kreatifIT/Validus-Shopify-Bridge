@@ -75,6 +75,12 @@ POST https://your-app.example/webhook/order
 
 The route is protected by an HMAC signature check against `SHOPIFY_WEBHOOK_SECRET` (see `Kreatif\ValidusShopifyBridge\Http\Middleware\VerifyShopifyWebhookSignature`).
 
+### If an order export fails
+
+`ExportOrderToValidusJob` retries a failed export up to 5 times with a backoff (10s, 30s, 60s, 5m, 15m) - but that only actually happens on a real queue with a worker running (`database`, `redis`, ...). On `QUEUE_CONNECTION=sync` (Laravel's default, and a common choice for a small store), there is no queue to retry from: the job runs once, synchronously, inside the webhook request, and a failure is returned to Shopify as a non-2xx response - Shopify's own webhook redelivery becomes the only retry mechanism at that point. Point `QUEUE_CONNECTION` at a real driver with a worker process if you want this package's own retry/backoff to do anything.
+
+Once retries (real or Shopify's) are exhausted, a `Kreatif\ValidusShopifyBridge\Events\OrderExportFailed` event fires, carrying the Shopify order ID, the human-readable order number (e.g. `#A2`), and the exception. As with `ProductSyncGroupFailed`, the package doesn't notify anyone itself - bind a listener in the consuming app if you want an alert (email, Slack, ...).
+
 ## Running the product sync
 
 ```bash
@@ -93,7 +99,49 @@ Schedule it in `routes/console.php` or `bootstrap/app.php` if it should run auto
 Schedule::command('validus-shopify:sync-products')->hourly();
 ```
 
+### Deactivating products Validus stops listing
+
+Every real (non-dry-run) sync also checks already-linked variants against the current Validus catalog. A variant whose Validus product has disappeared entirely (discontinued, or removed by mistake) is made unavailable to buy:
+
+- inventory tracking is turned on if it wasn't already (an untracked variant is always purchasable no matter what, so this is required for the next two steps to actually do anything),
+- stock is set to 0,
+- `inventoryPolicy` is set to `DENY` so it can't be oversold in the meantime.
+
+If that was the *only* Shopify variant still mapped to a given product, the whole product is also set to `ARCHIVED`. A product with other, still-current variants (e.g. a different vintage) is left alone - only the specific removed variant is touched.
+
+Nothing is deleted, and `sync-products` never un-links a `validus_shopify_product_map` row on its own: if Validus starts listing the product again and it's synced, the existing mapping is reused (updated, not duplicated). The variant's inventory policy/stock is **not** automatically restored on reactivation though - flip that back manually in Shopify Admin once confirmed.
+
+This is controlled by the `deactivation` config block:
+
+```php
+'deactivation' => [
+    'enabled' => env('VALIDUS_SHOPIFY_AUTO_DEACTIVATE', true),
+    'max_removed_ratio' => (float) env('VALIDUS_SHOPIFY_MAX_REMOVED_RATIO', 0.5),
+],
+```
+
+`max_removed_ratio` is a safety net: if the share of already-linked products that would be deactivated in one run exceeds it, the whole deactivation step is skipped for that run (the rest of the sync still happens normally) and a warning is logged instead. This is meant to catch a bad or partial Validus response - an API hiccup that doesn't throw, or a temporarily incomplete price list - being mistaken for a mass discontinuation; a real, large batch of intentional discontinuations would need `max_removed_ratio` raised (or the deactivation step run manually after reviewing `validus-shopify:diff`). Requires `shopify.location_id` to be set - silently does nothing without it, same as inventory quantity syncing.
+
+`validus-shopify:diff` reports the same "in Shopify but missing from Validus" set read-only, without writing anything - useful to check what a sync *would* deactivate ahead of time, or to audit it independent of the schedule.
+
 New variants are imported **without** inventory tracking enabled (a manual, per-variant decision in Shopify Admin). Once a variant is flipped to tracked in Shopify, subsequent syncs push `qtyInStock` for it automatically.
+
+### Logging
+
+Every `sync-products` run (dry or real) writes to a `validus-shopify` log channel, registered automatically (no `config/logging.php` changes needed) using Laravel's `daily` driver - `storage/logs/validus-shopify-YYYY-MM-DD.log`, one line per product group (created/updated/skipped, with the SKU/vintage/format/price it wrote) plus a run summary and, when it happens, the deactivation result. This is what you'd tail to answer "what did the last import actually do" - the console output itself is gone the moment the (usually scheduled, unattended) command finishes.
+
+Rotation is handled by the `daily` driver itself (old files past the retention window are deleted automatically, no external logrotate needed):
+
+```env
+VALIDUS_SHOPIFY_LOG_LEVEL=info   # default
+VALIDUS_SHOPIFY_LOG_DAYS=30      # default
+```
+
+Define your own `logging.channels.validus-shopify` in the consuming app's own config if you'd rather ship these logs somewhere else (Papertrail, Slack, etc.) - the package only registers this default when the app hasn't already defined that channel itself.
+
+### A failing product doesn't stop the rest of the sync
+
+Each Validus product group (one Shopify product, e.g. all vintages/formats of one wine) is synced independently. If a group fails - most commonly Shopify rejecting a `productSet` call because two distinct Validus products collide on the same option values, see [Troubleshooting](#troubleshooting) below - that one group is skipped, `sync-products` prints it and exits non-zero, but every other group and the deactivation step still run. A `Kreatif\ValidusShopifyBridge\Events\ProductSyncGroupFailed` event fires for each failure, carrying the group key, product title, the Validus product codes (SKUs) in that group, and the exception - the SKUs are what you'd actually look up in Validus, the group key alone is just the grouping prefix. The package doesn't send any notification itself, so bind a listener in the consuming app if you want one (email, Slack, etc.).
 
 ## Adopting a Shopify catalog that already has products in it
 
@@ -118,6 +166,41 @@ php artisan validus-shopify:link-existing
 
 Run `link-existing` once per store as part of onboarding it onto this package (a store with no pre-existing catalog can skip it - `sync-products` alone is enough). `diff` is safe to run at any time afterwards too, e.g. to spot-check for price drift or for a `diff`-listed product that Validus stopped returning entirely (`sync-products` only ever adds/updates a mapping, never removes one, so a discontinued product stays untouched in Shopify until someone acts on it manually).
 
+## Troubleshooting
+
+### `Access denied for productSet field. Required access: 'write_products' access scope`
+
+The Shopify Admin API token doesn't have the scopes this package needs. Fix it in Shopify Admin, not in code:
+
+1. *Settings → Apps and sales channels → Develop apps* → open the app the `SHOPIFY_ADMIN_TOKEN` belongs to.
+2. Tab **"Configuration"** → **"Admin API integration"** → *Edit* the API scopes.
+3. Enable at least **`write_products`** (covers `productSet`, `productVariantsBulkUpdate`, `productUpdate`) and **`write_inventory`** (covers `inventorySetQuantities`, `inventoryItemUpdate`, both used by the deactivation step). Add **`read_products`** / **`read_inventory`** too, for the read-only lookups (`variantsBySku`, `variantInventoryState`).
+4. Save, then **reinstall the app** - Shopify only issues a token with the new scopes after a reinstall, changing the scope list alone isn't enough. The existing `SHOPIFY_ADMIN_TOKEN` value usually stays valid (same token, now with more scopes); double check it on the same screen right after.
+
+If the error persists after reinstalling with the right scopes, the second half of the message ("the user must have a permission to create products") points at the *Shopify staff account* that installed/owns the app rather than the token itself - on Shopify Plus stores with locked staff permissions, that account also needs the "Products" permission.
+
+### `The variant 'X / Y' already exists. Please change at least one option value.`
+
+Two **distinct** Validus products (different `id`) resolve to the same Shopify option values (vintage + format) under the configured `VariantGroupingStrategy` - `productSet` then tries to create two variants with an identical option combination on the same product, which Shopify rejects. This is a data problem, not something to silently work around: find out from Validus/the customer what actually distinguishes the two products (a code digit the grouping strategy currently ignores, a packaging/lot difference, or simply a duplicate/erroneous entry that Validus should remove) before deciding how to disambiguate them - guessing risks silently merging or mispricing a real product.
+
+To find every colliding pair for a given `VariantGroupingStrategy` ahead of time:
+
+```php
+$grouping = app(\Kreatif\ValidusShopifyBridge\Grouping\VariantGroupingStrategy::class);
+$byKey = collect(app(\Kreatif\ValidusShopifyBridge\Clients\ValidusClient::class)->getProducts())
+    ->groupBy(fn ($p) => $grouping->groupKey($p));
+
+foreach ($byKey as $key => $group) {
+    foreach ($group->groupBy(fn ($p) => $grouping->vintageYear($p).'/'.($p['code']['bottleCapacity'] ?? '?')) as $combo => $items) {
+        if ($items->count() > 1) {
+            echo "{$key} {$items->first()['name']} - {$combo}: ".$items->pluck('code.code')->implode(', ').PHP_EOL;
+        }
+    }
+}
+```
+
+Until it's resolved, `sync-products` skips the affected group (see [above](#a-failing-product-doesnt-stop-the-rest-of-the-sync)) rather than failing the whole run or guessing which of the two to keep.
+
 ## Known open items
 
 These are deliberately left unhandled rather than guessed at - the corresponding code path throws instead of sending incomplete data:
@@ -125,6 +208,10 @@ These are deliberately left unhandled rather than guessed at - the corresponding
 - Discount/voucher line items and Italian customers' `fiscalId` (codice fiscale, not collected by Shopify's default checkout).
 - Payment gateways not yet listed in `payment_code_map`.
 - A Shopify order line item whose variant was never imported from Validus (no `ProductMap` entry).
+
+## Using with Claude Code
+
+`skills/validus-shopify-bridge/SKILL.md` covers the failure modes in this README that are easy to misdiagnose as a code bug (missing Shopify API scopes, an option-name mismatch, a Validus-side config error, colliding product codes, ...). If you use Claude Code on a project that installs this package, copy that file to `.claude/skills/validus-shopify-bridge/SKILL.md` in the project so Claude picks it up automatically - composer packages aren't scanned for skills on their own.
 
 ## Testing
 

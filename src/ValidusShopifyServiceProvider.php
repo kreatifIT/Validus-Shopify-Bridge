@@ -19,6 +19,7 @@ class ValidusShopifyServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/validus-shopify.php', 'validus-shopify');
+        $this->registerLogChannel();
 
         $this->app->singleton(ValidusClient::class, fn () => new ValidusClient(
             baseUrl: rtrim((string) config('validus-shopify.validus.base_url'), '/'),
@@ -54,6 +55,31 @@ class ValidusShopifyServiceProvider extends ServiceProvider
         $this->app->singleton(OrderExportService::class, fn () => new OrderExportService(
             paymentCodeMap: (array) config('validus-shopify.payment_code_map', []),
         ));
+    }
+
+    /**
+     * Registers a "validus-shopify" log channel so sync-products (and
+     * future commands) have somewhere to record what was actually
+     * imported/updated/skipped, without every consuming app needing to add
+     * this to its own config/logging.php first. Uses the daily driver so
+     * log rotation is handled by Laravel itself - no external logrotate
+     * setup needed. A consuming app that defines its own "validus-shopify"
+     * channel (e.g. to ship logs elsewhere) is left alone.
+     */
+    protected function registerLogChannel(): void
+    {
+        if (config('logging.channels.validus-shopify')) {
+            return;
+        }
+
+        config([
+            'logging.channels.validus-shopify' => [
+                'driver' => 'daily',
+                'path' => storage_path('logs/validus-shopify.log'),
+                'level' => env('VALIDUS_SHOPIFY_LOG_LEVEL', 'info'),
+                'days' => (int) env('VALIDUS_SHOPIFY_LOG_DAYS', 30),
+            ],
+        ]);
     }
 
     public function boot(): void

@@ -137,4 +137,87 @@ class ProductWriterTest extends TestCase
 
         Http::assertSentCount(3);
     }
+
+    public function test_set_inventory_tracked_sends_an_inventoryItemUpdate_mutation(): void
+    {
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => [
+                'inventoryItemUpdate' => ['userErrors' => []],
+            ]]),
+        ]);
+
+        $this->writer()->setInventoryTracked('gid://shopify/InventoryItem/1');
+
+        Http::assertSent(fn ($request) => str_contains($request['query'], 'inventoryItemUpdate')
+            && $request['variables']['id'] === 'gid://shopify/InventoryItem/1'
+            && $request['variables']['input']['tracked'] === true);
+    }
+
+    public function test_set_inventory_tracked_throws_on_user_errors(): void
+    {
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => [
+                'inventoryItemUpdate' => ['userErrors' => [['field' => ['tracked'], 'message' => 'Nope']]],
+            ]]),
+        ]);
+
+        $this->expectException(ShopifyApiException::class);
+
+        $this->writer()->setInventoryTracked('gid://shopify/InventoryItem/1');
+    }
+
+    public function test_set_variant_inventory_policy_sends_a_productVariantsBulkUpdate_mutation(): void
+    {
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => [
+                'productVariantsBulkUpdate' => ['userErrors' => []],
+            ]]),
+        ]);
+
+        $this->writer()->setVariantInventoryPolicy('gid://shopify/Product/1', 'gid://shopify/ProductVariant/1', 'DENY');
+
+        Http::assertSent(fn ($request) => str_contains($request['query'], 'productVariantsBulkUpdate')
+            && $request['variables']['productId'] === 'gid://shopify/Product/1'
+            && $request['variables']['variants'] === [['id' => 'gid://shopify/ProductVariant/1', 'inventoryPolicy' => 'DENY']]);
+    }
+
+    public function test_set_variant_inventory_policy_throws_on_user_errors(): void
+    {
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => [
+                'productVariantsBulkUpdate' => ['userErrors' => [['field' => ['inventoryPolicy'], 'message' => 'Nope']]],
+            ]]),
+        ]);
+
+        $this->expectException(ShopifyApiException::class);
+
+        $this->writer()->setVariantInventoryPolicy('gid://shopify/Product/1', 'gid://shopify/ProductVariant/1', 'DENY');
+    }
+
+    public function test_set_product_status_sends_a_productUpdate_mutation(): void
+    {
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => [
+                'productUpdate' => ['userErrors' => []],
+            ]]),
+        ]);
+
+        $this->writer()->setProductStatus('gid://shopify/Product/1', 'ARCHIVED');
+
+        Http::assertSent(fn ($request) => str_contains($request['query'], 'productUpdate')
+            && $request['variables']['input'] === ['id' => 'gid://shopify/Product/1', 'status' => 'ARCHIVED']);
+    }
+
+    public function test_set_product_status_throws_on_user_errors(): void
+    {
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => [
+                'productUpdate' => ['userErrors' => [['field' => ['status'], 'message' => 'Nope']]],
+            ]]),
+        ]);
+
+        $this->expectException(ShopifyApiException::class);
+
+        $this->writer()->setProductStatus('gid://shopify/Product/1', 'ARCHIVED');
+    }
 }
