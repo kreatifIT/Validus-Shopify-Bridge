@@ -54,6 +54,43 @@ class OrderExportServiceTest extends TestCase
         $this->assertSame(5.5, $payload['taxBreakdown'][0]['tax']);
     }
 
+    public function test_an_order_without_a_company_name_is_reported_as_a_private_person(): void
+    {
+        ProductMap::query()->create([
+            'validus_id' => '101512',
+            'validus_code' => '99070121',
+            'shopify_variant_id' => '424242',
+        ]);
+
+        $service = new OrderExportService(['shopify_payments' => 'CC']);
+
+        $payload = $service->buildPayload($this->order());
+
+        $this->assertSame('person', $payload['customer']['type']);
+        $this->assertNull($payload['customer']['companyName']);
+    }
+
+    public function test_an_order_with_a_company_name_on_the_billing_address_is_reported_as_a_company(): void
+    {
+        ProductMap::query()->create([
+            'validus_id' => '101512',
+            'validus_code' => '99070121',
+            'shopify_variant_id' => '424242',
+        ]);
+
+        $order = $this->order();
+        // Shopify's standard checkout has no B2B toggle - a business
+        // customer just fills the free-text "Company" field.
+        $order['billing_address']['company'] = 'Ristorante Da Mario';
+
+        $service = new OrderExportService(['shopify_payments' => 'CC']);
+
+        $payload = $service->buildPayload($order);
+
+        $this->assertSame('company', $payload['customer']['type']);
+        $this->assertSame('Ristorante Da Mario', $payload['customer']['companyName']);
+    }
+
     public function test_it_refuses_to_build_a_payload_for_an_unmapped_line_item(): void
     {
         // No ProductMap row created - simulates a Shopify product that was

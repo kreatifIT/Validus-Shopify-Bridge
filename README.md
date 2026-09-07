@@ -90,6 +90,10 @@ Each line item is sent with its original, pre-discount `unitPriceNet` (that's wh
 
 The order-level `discountAmount` is Shopify's `total_discounts` as-is either way, regardless of how the corresponding item(s) above ended up reporting it.
 
+### Business customers
+
+Standard Shopify checkout (i.e. not the Shopify Plus B2B feature - a separate, paid-tier concept with its own company accounts and wholesale checkout) has no "is this a business" toggle. The only signal available is whatever the customer typed into the free-text **Company** field on their billing (falling back to shipping) address: if it's non-empty, `customer.type` is reported as `"company"` with that value as `companyName`; otherwise `"person"` with `companyName: null`. There's no VAT-number field anywhere in checkout or account, so `vatNumber` is always sent as null - same situation as `fiscalId` (see [Known open items](#known-open-items)).
+
 ## Running the product sync
 
 ```bash

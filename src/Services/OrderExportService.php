@@ -26,6 +26,10 @@ use Kreatif\ValidusShopifyBridge\Models\ProductMap;
  * - Italian customers' fiscalId (codice fiscale) is always sent as null -
  *   Shopify's checkout doesn't collect it, and it's optional on Validus'
  *   side, so this is not a defect to fix, just a known limitation.
+ * - vatNumber is always null too, same reason - no such field anywhere in
+ *   checkout or account. customer.type/companyName ARE derived (from the
+ *   billing/shipping address' free-text "Company" field - the only "is this
+ *   a business" signal standard, non-Plus Shopify checkout has), see customer().
  * - additional payment methods beyond what's in payment_code_map (throws too)
  */
 class OrderExportService
@@ -70,11 +74,19 @@ class OrderExportService
         $billing = Arr::get($shopifyOrder, 'billing_address', []);
         $shipping = Arr::get($shopifyOrder, 'shipping_address', $billing);
 
+        // Shopify's standard checkout has no dedicated "is this a business"
+        // toggle (that's a Shopify Plus B2B feature) - a business customer
+        // just fills the free-text "Company" field on their address, same
+        // as a private one leaving it blank. That's the only signal we have.
+        $companyName = Arr::get($billing, 'company') ?: Arr::get($shipping, 'company');
+
         return [
             'customerId' => (string) Arr::get($customer, 'id', ''),
             'countryCode' => Arr::get($billing, 'country_code'),
-            'type' => 'person',
-            'companyName' => null,
+            'type' => $companyName ? 'company' : 'person',
+            'companyName' => $companyName ?: null,
+            // Not collected anywhere (no VAT-number field in checkout or
+            // account) - always null until/unless one gets added.
             'vatNumber' => null,
             // Codice Fiscale for Italian customers - not collected by
             // Shopify's default checkout. Optional on Validus' side, so
