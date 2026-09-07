@@ -81,6 +81,15 @@ The route is protected by an HMAC signature check against `SHOPIFY_WEBHOOK_SECRE
 
 Once retries (real or Shopify's) are exhausted, a `Kreatif\ValidusShopifyBridge\Events\OrderExportFailed` event fires, carrying the Shopify order ID, the human-readable order number (e.g. `#A2`), and the exception. As with `ProductSyncGroupFailed`, the package doesn't notify anyone itself - bind a listener in the consuming app if you want an alert (email, Slack, ...).
 
+### Discounts
+
+Each line item is sent with its original, pre-discount `unitPriceNet` (that's what Shopify's `line_items[].price` is). How the discount itself is reported depends on what it targets, read off Shopify's order-level `discount_applications[].target_selection`:
+
+- **Product-specific** (`target_selection: "entitled"`/`"explicit"` - a discount that only applies to certain products): folded into that line's `discountPercent`, computed from Shopify's `discount_allocations` for that line. Validus is expected to apply the percentage itself rather than being sent an already-discounted unit price.
+- **Cart-wide** (`target_selection: "all"` - a discount code or automatic discount that applies to the whole order, e.g. "10% off everything"): reported as its own position instead - `productId`/`code` left null, `unitPriceNet` the negative discount amount, `quantity: 1` - rather than being spread across every product's `discountPercent`. One position per such discount (an order can combine more than one, e.g. a code plus an automatic discount stacking).
+
+The order-level `discountAmount` is Shopify's `total_discounts` as-is either way, regardless of how the corresponding item(s) above ended up reporting it.
+
 ## Running the product sync
 
 ```bash
@@ -205,9 +214,10 @@ Until it's resolved, `sync-products` skips the affected group (see [above](#a-fa
 
 These are deliberately left unhandled rather than guessed at - the corresponding code path throws instead of sending incomplete data:
 
-- Discount/voucher line items and Italian customers' `fiscalId` (codice fiscale, not collected by Shopify's default checkout).
 - Payment gateways not yet listed in `payment_code_map`.
-- A Shopify order line item whose variant was never imported from Validus (no `ProductMap` entry).
+- A Shopify order line item that *has* a `variant_id` but no matching `ProductMap` entry - a real Shopify product that was never imported from Validus. A line item without any `variant_id` at all (gift card, manual draft-order line, voucher) is *not* in this list: it's reported to Validus with `productId`/`code` left null, since Validus accepts a line item without a product code.
+
+Not open items, just known, permanent limitations - not bugs to fix: Italian customers' `fiscalId` (codice fiscale) is always sent as null, since Shopify's default checkout doesn't collect it and it's optional on Validus' side.
 
 ## Using with Claude Code
 
