@@ -54,6 +54,43 @@ class OrderExportServiceTest extends TestCase
         $this->assertSame(5.5, $payload['taxBreakdown'][0]['tax']);
     }
 
+    public function test_an_order_without_a_company_name_is_reported_as_a_private_person(): void
+    {
+        ProductMap::query()->create([
+            'validus_id' => '101512',
+            'validus_code' => '99070121',
+            'shopify_variant_id' => '424242',
+        ]);
+
+        $service = new OrderExportService(['shopify_payments' => 'CC']);
+
+        $payload = $service->buildPayload($this->order());
+
+        $this->assertSame('person', $payload['customer']['type']);
+        $this->assertNull($payload['customer']['companyName']);
+    }
+
+    public function test_an_order_with_a_company_name_on_the_billing_address_is_reported_as_a_company(): void
+    {
+        ProductMap::query()->create([
+            'validus_id' => '101512',
+            'validus_code' => '99070121',
+            'shopify_variant_id' => '424242',
+        ]);
+
+        $order = $this->order();
+        // Shopify's standard checkout has no B2B toggle - a business
+        // customer just fills the free-text "Company" field.
+        $order['billing_address']['company'] = 'Ristorante Da Mario';
+
+        $service = new OrderExportService(['shopify_payments' => 'CC']);
+
+        $payload = $service->buildPayload($order);
+
+        $this->assertSame('company', $payload['customer']['type']);
+        $this->assertSame('Ristorante Da Mario', $payload['customer']['companyName']);
+    }
+
     public function test_it_refuses_to_build_a_payload_for_an_unmapped_line_item(): void
     {
         // No ProductMap row created - simulates a Shopify product that was
@@ -63,6 +100,116 @@ class OrderExportServiceTest extends TestCase
         $this->expectException(MissingProductMappingException::class);
 
         $service->buildPayload($this->order());
+    }
+
+    public function test_it_computes_a_line_items_discount_percent_from_shopifys_discount_allocations(): void
+    {
+        ProductMap::query()->create([
+            'validus_id' => '101512',
+            'validus_code' => '99070121',
+            'shopify_variant_id' => '424242',
+        ]);
+
+        $order = $this->order();
+        // Fixture line item: price 12.50 * quantity 2 = 25.00 gross;
+        // a 5.00 discount allocation is a 20% line-level discount.
+        $order['line_items'][0]['discount_allocations'] = [
+            ['amount' => '5.00', 'discount_application_index' => 0],
+        ];
+
+        $service = new OrderExportService(['shopify_payments' => 'CC']);
+
+        $payload = $service->buildPayload($order);
+
+        $this->assertSame(20.0, $payload['items'][0]['discountPercent']);
+        // unitPriceNet stays the pre-discount price - discountPercent is
+        // what tells Validus how much of it to take off.
+        $this->assertSame(12.5, $payload['items'][0]['unitPriceNet']);
+    }
+
+    public function test_a_cart_wide_discount_is_reported_as_its_own_position_instead_of_reducing_product_lines(): void
+    {
+        ProductMap::query()->create([
+            'validus_id' => '101512',
+            'validus_code' => '99070121',
+            'shopify_variant_id' => '424242',
+        ]);
+
+        $order = $this->order();
+        // 10% off the whole cart via a discount code - Shopify still
+        // allocates it down to each line item, but target_selection "all"
+        // marks it as a cart-wide discount rather than a product-specific one.
+        $order['discount_applications'] = [
+            ['type' => 'discount_code', 'code' => 'SUMMER10', 'value' => '10.0', 'value_type' => 'percentage', 'allocation_method' => 'across', 'target_selection' => 'all', 'target_type' => 'line_item'],
+        ];
+        $order['line_items'][0]['discount_allocations'] = [
+            ['amount' => '2.50', 'discount_application_index' => 0],
+        ];
+
+        $service = new OrderExportService(['shopify_payments' => 'CC']);
+
+        $payload = $service->buildPayload($order);
+
+        $this->assertCount(2, $payload['items']);
+
+        // The wine itself is unaffected - the cart-wide discount is NOT
+        // folded into its discountPercent.
+        $this->assertSame(0.0, $payload['items'][0]['discountPercent']);
+        $this->assertSame(12.5, $payload['items'][0]['unitPriceNet']);
+
+        // The discount gets its own position instead.
+        $discountItem = $payload['items'][1];
+        $this->assertNull($discountItem['productId']);
+        $this->assertNull($discountItem['code']);
+        $this->assertSame('Rabatt: SUMMER10', $discountItem['description']);
+        $this->assertSame(1, $discountItem['quantity']);
+        $this->assertSame(-2.5, $discountItem['unitPriceNet']);
+        $this->assertSame(22.0, $discountItem['vatRate']);
+    }
+
+    public function test_a_line_item_without_any_discount_allocations_reports_a_zero_percent_discount(): void
+    {
+        ProductMap::query()->create([
+            'validus_id' => '101512',
+            'validus_code' => '99070121',
+            'shopify_variant_id' => '424242',
+        ]);
+
+        $service = new OrderExportService(['shopify_payments' => 'CC']);
+
+        $payload = $service->buildPayload($this->order());
+
+        $this->assertSame(0.0, $payload['items'][0]['discountPercent']);
+    }
+
+    public function test_a_line_item_without_a_shopify_variant_is_reported_without_a_product_code(): void
+    {
+        ProductMap::query()->create([
+            'validus_id' => '101512',
+            'validus_code' => '99070121',
+            'shopify_variant_id' => '424242',
+        ]);
+
+        $order = $this->order();
+        $order['line_items'][] = [
+            'id' => 222,
+            'variant_id' => null,
+            'sku' => null,
+            'name' => 'Geschenkgutschein',
+            'quantity' => 1,
+            'price' => '25.00',
+            'tax_lines' => [],
+        ];
+
+        $service = new OrderExportService(['shopify_payments' => 'CC']);
+
+        $payload = $service->buildPayload($order);
+
+        $this->assertCount(2, $payload['items']);
+        $this->assertNull($payload['items'][1]['productId']);
+        $this->assertNull($payload['items'][1]['code']);
+        $this->assertSame('Geschenkgutschein', $payload['items'][1]['description']);
+        $this->assertSame(25.0, $payload['items'][1]['unitPriceNet']);
     }
 
     public function test_it_refuses_to_build_a_payload_for_an_unconfigured_payment_gateway(): void
