@@ -238,6 +238,7 @@ class ProductSyncServiceTest extends TestCase
         $this->assertCount(1, $result['failures']);
         $this->assertSame('99', $result['failures'][0]['groupKey']);
         $this->assertSame('Other Wine', $result['failures'][0]['title']);
+        $this->assertSame(['99070025'], $result['failures'][0]['skus']);
         $this->assertStringContainsString('already exists', $result['failures'][0]['message']);
     }
 
@@ -258,7 +259,7 @@ class ProductSyncServiceTest extends TestCase
 
         $this->service($writer)->run();
 
-        Event::assertDispatched(ProductSyncGroupFailed::class, fn ($event) => $event->groupKey === '99' && $event->title === 'Other Wine');
+        Event::assertDispatched(ProductSyncGroupFailed::class, fn ($event) => $event->groupKey === '99' && $event->title === 'Other Wine' && $event->skus === ['99070025']);
     }
 
     public function test_deactivation_still_runs_when_another_group_fails(): void

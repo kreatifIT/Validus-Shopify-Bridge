@@ -14,9 +14,13 @@ use Throwable;
  */
 class ProductSyncGroupFailed
 {
+    /**
+     * @param  array<int, string>  $skus  Validus product codes (code.code) in the failed group.
+     */
     public function __construct(
         public string $groupKey,
         public string $title,
+        public array $skus,
         public Throwable $exception,
     ) {}
 }

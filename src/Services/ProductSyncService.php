@@ -25,7 +25,7 @@ class ProductSyncService
     ) {}
 
     /**
-     * @return array{groups: int, variants: int, dryRun: bool, preview: array<int, array<string, mixed>>, deactivation: array{skipped: ?string, variants: int, products: int}, failures: array<int, array{groupKey: string, title: string, message: string}>}
+     * @return array{groups: int, variants: int, dryRun: bool, preview: array<int, array<string, mixed>>, deactivation: array{skipped: ?string, variants: int, products: int}, failures: array<int, array{groupKey: string, title: string, skus: array<int, string>, message: string}>}
      */
     public function run(bool $dryRun = false): array
     {
@@ -65,14 +65,16 @@ class ProductSyncService
                 ]);
             } catch (Throwable $e) {
                 $title = $groupProducts->first()['name'] ?? (string) $groupKey;
-                $failures[] = ['groupKey' => (string) $groupKey, 'title' => $title, 'message' => $e->getMessage()];
+                $skus = $groupProducts->map(fn (array $product) => $product['code']['code'] ?? (string) $product['id'])->all();
+                $failures[] = ['groupKey' => (string) $groupKey, 'title' => $title, 'skus' => $skus, 'message' => $e->getMessage()];
                 report($e);
-                event(new ProductSyncGroupFailed((string) $groupKey, $title, $e));
+                event(new ProductSyncGroupFailed((string) $groupKey, $title, $skus, $e));
 
                 Log::channel('validus-shopify')->warning('Product group sync failed', [
                     'dryRun' => $dryRun,
                     'groupKey' => (string) $groupKey,
                     'title' => $title,
+                    'skus' => $skus,
                     'message' => $e->getMessage(),
                 ]);
             }

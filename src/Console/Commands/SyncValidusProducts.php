@@ -32,7 +32,7 @@ class SyncValidusProducts extends Command
     }
 
     /**
-     * @param  array<int, array{groupKey: string, title: string, message: string}>  $failures
+     * @param  array<int, array{groupKey: string, title: string, skus: array<int, string>, message: string}>  $failures
      */
     protected function renderFailures(array $failures): void
     {
@@ -44,7 +44,8 @@ class SyncValidusProducts extends Command
         $this->error(count($failures).' product group(s) failed and were skipped - the rest of the sync still ran. A ProductSyncGroupFailed event was fired for each one:');
 
         foreach ($failures as $failure) {
-            $this->line("  - {$failure['title']} ({$failure['groupKey']}): {$failure['message']}");
+            $skus = implode(', ', $failure['skus']);
+            $this->line("  - {$failure['title']} ({$failure['groupKey']}, SKUs: {$skus}): {$failure['message']}");
         }
     }
 
