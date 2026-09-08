@@ -138,6 +138,50 @@ class ProductWriterTest extends TestCase
         Http::assertSentCount(3);
     }
 
+    public function test_set_inventory_quantity_turns_a_bare_numeric_location_id_into_a_gid(): void
+    {
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => [
+                'inventorySetQuantities' => ['userErrors' => []],
+            ]]),
+        ]);
+
+        // config('validus-shopify.shopify.location_id') is human-typed, most
+        // likely the bare numeric id copied from Shopify Admin's URL - unlike
+        // every other id here, it never round-trips through a prior Shopify
+        // response first, so nothing else would have GID-prefixed it already.
+        $this->writer()->setInventoryQuantity('gid://shopify/InventoryItem/1', '123371749707', 0);
+
+        Http::assertSent(fn ($request) => str_contains($request['query'], 'inventorySetQuantities')
+            && $request['variables']['input']['quantities'][0]['locationId'] === 'gid://shopify/Location/123371749707');
+    }
+
+    public function test_set_inventory_quantity_leaves_an_already_prefixed_location_id_alone(): void
+    {
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => [
+                'inventorySetQuantities' => ['userErrors' => []],
+            ]]),
+        ]);
+
+        $this->writer()->setInventoryQuantity('gid://shopify/InventoryItem/1', 'gid://shopify/Location/123371749707', 0);
+
+        Http::assertSent(fn ($request) => $request['variables']['input']['quantities'][0]['locationId'] === 'gid://shopify/Location/123371749707');
+    }
+
+    public function test_set_inventory_quantity_throws_on_user_errors(): void
+    {
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => [
+                'inventorySetQuantities' => ['userErrors' => [['field' => ['quantities'], 'message' => 'Nope']]],
+            ]]),
+        ]);
+
+        $this->expectException(ShopifyApiException::class);
+
+        $this->writer()->setInventoryQuantity('gid://shopify/InventoryItem/1', '123371749707', 0);
+    }
+
     public function test_set_inventory_tracked_sends_an_inventoryItemUpdate_mutation(): void
     {
         Http::fake([

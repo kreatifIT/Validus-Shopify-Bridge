@@ -39,6 +39,8 @@ VALIDUS_SHOPIFY_LOCATION_ID=
 query { locations(first: 5) { nodes { id name } } }
 ```
 
+Either the bare numeric id (as it appears in the Shopify Admin URL) or the full `gid://shopify/Location/...` string from that query works - the package normalizes it either way.
+
 ### Product code format
 
 `config('validus-shopify.grouping')` controls how `code.code` (e.g. `"56070025"`) is split into a grouping key and a vintage year. The defaults assume a common layout: first 2 digits = product, last 2 digits = vintage (with a `20` century prefix). The digits in between are intentionally ignored - bottle size/format comes from the separate `code.bottleCapacity` + `code.measureUnit` API fields instead. Confirm the exact digit layout with your customer; if their Validus code scheme doesn't fit this pattern at all, supply your own `Kreatif\ValidusShopifyBridge\Grouping\VariantGroupingStrategy` implementation and bind it in your own service provider instead of `ProductCodeGroupingStrategy`.
