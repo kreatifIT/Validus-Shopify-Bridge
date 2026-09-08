@@ -63,6 +63,7 @@ class ProductSyncServiceTest extends TestCase
         $this->fakeValidusProductsEndpoint();
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $writer->shouldReceive('upsertProduct')
             ->once()
             ->withArgs(function (array $product) {
@@ -91,6 +92,108 @@ class ProductSyncServiceTest extends TestCase
         $this->assertSame('gid://shopify/Product/1', ProductMap::query()->where('validus_id', '1001')->value('shopify_product_id'));
     }
 
+    public function test_a_code_already_listed_as_a_separate_shopify_product_is_excluded_from_the_group(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+
+        $writer = Mockery::mock(ProductWriter::class);
+        // 56090125 already lives on a different, unrelated Shopify product -
+        // e.g. someone set it up manually before this package was in the
+        // picture, or it's one half of a Validus code collision (see
+        // README "Known open items") and this is the OTHER, non-colliding
+        // half's product.
+        $writer->shouldReceive('variantsBySku')->andReturn([
+            '56090125' => ['id' => 'gid://shopify/ProductVariant/999', 'price' => '38.00', 'productId' => 'gid://shopify/Product/999', 'productTitle' => 'Some Other Listing'],
+        ]);
+        $writer->shouldReceive('upsertProduct')
+            ->once()
+            ->withArgs(fn (array $product) => count($product['variants']) === 1 && $product['variants'][0]['sku'] === '56070025')
+            ->andReturn([
+                'productId' => 'gid://shopify/Product/1',
+                'variants' => [['id' => 'gid://shopify/ProductVariant/1', 'sku' => '56070025']],
+            ]);
+        $writer->shouldReceive('variantInventoryState')->andReturn([]);
+
+        $result = $this->service($writer)->run();
+
+        $this->assertSame(1, $result['variants']);
+        $this->assertSame(1, ProductMap::query()->count());
+        $this->assertNull(ProductMap::query()->where('validus_id', '1002')->first());
+    }
+
+    public function test_dry_run_previews_the_codes_that_would_be_skipped_as_a_separate_shopify_product(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+
+        $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([
+            '56090125' => ['id' => 'gid://shopify/ProductVariant/999', 'price' => '38.00', 'productId' => 'gid://shopify/Product/999', 'productTitle' => 'Some Other Listing'],
+        ]);
+        $writer->shouldNotReceive('upsertProduct');
+
+        $result = $this->service($writer)->run(dryRun: true);
+
+        $this->assertCount(1, $result['preview'][0]['variants']);
+        $this->assertSame('56070025', $result['preview'][0]['variants'][0]['sku']);
+        $this->assertCount(1, $result['preview'][0]['skippedAsForeignProduct']);
+        $this->assertSame('56090125', $result['preview'][0]['skippedAsForeignProduct'][0]['sku']);
+        $this->assertSame('gid://shopify/Product/999', $result['preview'][0]['skippedAsForeignProduct'][0]['shopifyProductId']);
+        $this->assertSame('Some Other Listing', $result['preview'][0]['skippedAsForeignProduct'][0]['shopifyProductTitle']);
+    }
+
+    public function test_a_group_is_skipped_entirely_when_every_code_already_belongs_to_a_different_shopify_product(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+
+        $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([
+            '56070025' => ['id' => 'gid://shopify/ProductVariant/998', 'price' => '18.00', 'productId' => 'gid://shopify/Product/998', 'productTitle' => 'Listing A'],
+            '56090125' => ['id' => 'gid://shopify/ProductVariant/999', 'price' => '38.00', 'productId' => 'gid://shopify/Product/999', 'productTitle' => 'Listing B'],
+        ]);
+        $writer->shouldNotReceive('upsertProduct');
+
+        $result = $this->service($writer)->run();
+
+        $this->assertSame(1, $result['groups']); // not a failure, just nothing left to do
+        $this->assertSame(0, $result['variants']);
+        $this->assertSame(0, ProductMap::query()->count());
+    }
+
+    public function test_a_code_already_on_the_same_shopify_product_this_group_maps_to_is_not_excluded(): void
+    {
+        $this->fakeValidusProductsEndpoint();
+
+        ProductMap::query()->create([
+            'validus_id' => '1001',
+            'validus_code' => '56070025',
+            'shopify_product_id' => 'gid://shopify/Product/1',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/1',
+        ]);
+
+        $writer = Mockery::mock(ProductWriter::class);
+        // Both codes already live on the SAME product this group maps to -
+        // the normal "update" case, not a collision with something else.
+        $writer->shouldReceive('variantsBySku')->andReturn([
+            '56070025' => ['id' => 'gid://shopify/ProductVariant/1', 'price' => '18.00', 'productId' => 'gid://shopify/Product/1', 'productTitle' => 'Demo Wine'],
+            '56090125' => ['id' => 'gid://shopify/ProductVariant/2', 'price' => '38.00', 'productId' => 'gid://shopify/Product/1', 'productTitle' => 'Demo Wine'],
+        ]);
+        $writer->shouldReceive('upsertProduct')
+            ->once()
+            ->withArgs(fn (array $product) => count($product['variants']) === 2)
+            ->andReturn([
+                'productId' => 'gid://shopify/Product/1',
+                'variants' => [
+                    ['id' => 'gid://shopify/ProductVariant/1', 'sku' => '56070025'],
+                    ['id' => 'gid://shopify/ProductVariant/2', 'sku' => '56090125'],
+                ],
+            ]);
+        $writer->shouldReceive('variantInventoryState')->andReturn([]);
+
+        $result = $this->service($writer)->run();
+
+        $this->assertSame(2, $result['variants']);
+    }
+
     public function test_it_updates_the_existing_shopify_product_instead_of_creating_a_new_one(): void
     {
         $this->fakeValidusProductsEndpoint();
@@ -103,6 +206,7 @@ class ProductSyncServiceTest extends TestCase
         ]);
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $writer->shouldReceive('upsertProduct')
             ->once()
             ->withArgs(fn (array $product) => $product['shopifyProductId'] === 'gid://shopify/Product/1')
@@ -125,6 +229,7 @@ class ProductSyncServiceTest extends TestCase
         $this->fakeValidusProductsEndpoint();
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $writer->shouldReceive('upsertProduct')->andReturn([
             'productId' => 'gid://shopify/Product/1',
             'variants' => [
@@ -148,6 +253,7 @@ class ProductSyncServiceTest extends TestCase
         $this->fakeValidusProductsEndpoint();
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $writer->shouldNotReceive('upsertProduct');
         $writer->shouldNotReceive('setInventoryQuantity');
 
@@ -162,6 +268,7 @@ class ProductSyncServiceTest extends TestCase
         $this->fakeValidusProductsEndpoint();
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $writer->shouldNotReceive('upsertProduct');
 
         $result = $this->service($writer)->run(dryRun: true);
@@ -186,6 +293,7 @@ class ProductSyncServiceTest extends TestCase
         ]);
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $writer->shouldNotReceive('upsertProduct');
 
         $result = $this->service($writer)->run(dryRun: true);
@@ -216,6 +324,7 @@ class ProductSyncServiceTest extends TestCase
         $this->fakeValidusProductsEndpointWithTwoGroups();
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $writer->shouldReceive('upsertProduct')->andReturnUsing(function (array $product) {
             if ($product['title'] === 'Other Wine') {
                 throw ShopifyApiException::userErrors('productSet', [['message' => "The variant '2025 / 75cl' already exists."]]);
@@ -248,6 +357,7 @@ class ProductSyncServiceTest extends TestCase
         $this->fakeValidusProductsEndpointWithTwoGroups();
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $writer->shouldReceive('upsertProduct')->andReturnUsing(function (array $product) {
             if ($product['title'] === 'Other Wine') {
                 throw ShopifyApiException::userErrors('productSet', [['message' => 'boom']]);
@@ -275,6 +385,7 @@ class ProductSyncServiceTest extends TestCase
         ]);
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $writer->shouldReceive('upsertProduct')->andReturnUsing(function (array $product) {
             if ($product['title'] === 'Other Wine') {
                 throw ShopifyApiException::userErrors('productSet', [['message' => 'boom']]);
@@ -343,6 +454,7 @@ class ProductSyncServiceTest extends TestCase
         Log::partialMock()->shouldReceive('channel')->with('validus-shopify')->andReturn($logger);
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $this->stubNormalGroupUpsert($writer);
         $writer->shouldReceive('variantInventoryState')->andReturn([]);
 
@@ -363,6 +475,7 @@ class ProductSyncServiceTest extends TestCase
         ]);
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $this->stubNormalGroupUpsert($writer);
         $writer->shouldReceive('variantInventoryState')->andReturn([
             'gid://shopify/ProductVariant/9' => ['inventoryItemId' => 'gid://shopify/InventoryItem/9', 'tracked' => false],
@@ -392,6 +505,7 @@ class ProductSyncServiceTest extends TestCase
         ]);
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $this->stubNormalGroupUpsert($writer);
         $writer->shouldReceive('variantInventoryState')->andReturn([
             'gid://shopify/ProductVariant/3' => ['inventoryItemId' => 'gid://shopify/InventoryItem/3', 'tracked' => true],
@@ -420,6 +534,7 @@ class ProductSyncServiceTest extends TestCase
         ]);
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $writer->shouldNotReceive('upsertProduct');
         $writer->shouldNotReceive('setInventoryTracked');
         $writer->shouldNotReceive('setInventoryQuantity');
@@ -447,6 +562,7 @@ class ProductSyncServiceTest extends TestCase
         }
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $this->stubNormalGroupUpsert($writer);
         $writer->shouldReceive('variantInventoryState')->andReturn([]);
         $writer->shouldNotReceive('setInventoryTracked');
@@ -474,6 +590,7 @@ class ProductSyncServiceTest extends TestCase
         ]);
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $this->stubNormalGroupUpsert($writer);
         $writer->shouldReceive('variantInventoryState')->andReturn([]);
         $writer->shouldNotReceive('setProductStatus');
@@ -495,6 +612,7 @@ class ProductSyncServiceTest extends TestCase
         ]);
 
         $writer = Mockery::mock(ProductWriter::class);
+        $writer->shouldReceive('variantsBySku')->andReturn([]);
         $this->stubNormalGroupUpsert($writer);
         $writer->shouldReceive('variantInventoryState')->andReturn([]);
         $writer->shouldNotReceive('setProductStatus');

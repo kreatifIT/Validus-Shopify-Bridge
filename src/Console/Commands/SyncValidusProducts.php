@@ -94,5 +94,26 @@ class SyncValidusProducts extends Command
         $updateCount = collect($preview)->where('action', 'update')->count();
 
         $this->line("{$createCount} new Shopify product(s) would be created, {$updateCount} existing product(s) would be updated.");
+
+        $this->renderSkippedAsForeignProduct($preview);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $preview
+     */
+    protected function renderSkippedAsForeignProduct(array $preview): void
+    {
+        $skipped = collect($preview)->flatMap(fn (array $group) => $group['skippedAsForeignProduct']);
+
+        if ($skipped->isEmpty()) {
+            return;
+        }
+
+        $this->newLine();
+        $this->warn("{$skipped->count()} product code(s) already listed as a separate Shopify product - left as-is instead of also being folded in as a variant:");
+
+        foreach ($skipped as $skip) {
+            $this->line("  - {$skip['sku']} -> already on \"{$skip['shopifyProductTitle']}\" ({$skip['shopifyProductId']})");
+        }
     }
 }

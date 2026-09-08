@@ -49,7 +49,7 @@ class ProductSyncService
             try {
                 $groupPreview = $this->syncGroup((string) $groupKey, $groupProducts->all(), $dryRun);
                 $successfulGroups++;
-                $variantCount += $groupProducts->count();
+                $variantCount += count($groupPreview['variants']);
 
                 if ($dryRun) {
                     $preview[] = $groupPreview;
@@ -187,18 +187,47 @@ class ProductSyncService
      * concrete to show instead of just a count.
      *
      * @param  array<int, array<string, mixed>>  $validusProducts
-     * @return array{groupKey: string, title: string, action: string, shopifyProductId: ?string, variants: array<int, array{sku: string, vintage: string, format: string, price: string}>}
+     * @return array{groupKey: string, title: string, action: string, shopifyProductId: ?string, variants: array<int, array{sku: string, vintage: string, format: string, price: string}>, skippedAsForeignProduct: array<int, array{sku: string, shopifyProductId: string, shopifyProductTitle: string}>}
      */
     protected function syncGroup(string $groupKey, array $validusProducts, bool $dryRun): array
     {
         $title = $validusProducts[0]['name'] ?? $groupKey;
 
+        $existingProductId = ProductMap::query()
+            ->where('validus_code', 'like', $groupKey.'%')
+            ->whereNotNull('shopify_product_id')
+            ->value('shopify_product_id');
+
+        $codes = array_map(fn (array $p) => $p['code']['code'] ?? (string) $p['id'], $validusProducts);
+        $existingShopifyVariants = $this->shopify->variantsBySku($codes);
+
         $years = [];
         $formats = [];
         $variantsBySku = [];
+        $skippedAsForeignProduct = [];
 
         foreach ($validusProducts as $validusProduct) {
             $sku = $validusProduct['code']['code'] ?? (string) $validusProduct['id'];
+
+            // Two distinct Validus products occasionally collide on the same
+            // computed vintage/format (see README "Known open items") - if
+            // this code already lives on a Shopify product OTHER than the
+            // one this group maps to, it already has a home (possibly one a
+            // human deliberately set up, e.g. a multi-bottle gift set).
+            // Leave it there instead of also trying to fold it in here,
+            // which Shopify would reject as a duplicate variant anyway.
+            $existing = $existingShopifyVariants[$sku] ?? null;
+
+            if ($existing && $existing['productId'] !== $existingProductId) {
+                $skippedAsForeignProduct[] = [
+                    'sku' => $sku,
+                    'shopifyProductId' => $existing['productId'],
+                    'shopifyProductTitle' => $existing['productTitle'],
+                ];
+
+                continue;
+            }
+
             $year = (string) ($this->grouping->vintageYear($validusProduct) ?? '');
             $format = $this->formatLabel($validusProduct);
             $price = $this->price($validusProduct);
@@ -220,20 +249,25 @@ class ProductSyncService
             ];
         }
 
-        $existingProductId = ProductMap::query()
-            ->where('validus_code', 'like', $groupKey.'%')
-            ->whereNotNull('shopify_product_id')
-            ->value('shopify_product_id');
+        if (! empty($skippedAsForeignProduct)) {
+            Log::channel('validus-shopify')->warning('Skipped product code(s) already listed as a separate Shopify product', [
+                'dryRun' => $dryRun,
+                'groupKey' => $groupKey,
+                'title' => $title,
+                'skipped' => $skippedAsForeignProduct,
+            ]);
+        }
 
         $groupPreview = [
             'groupKey' => $groupKey,
             'title' => $title,
-            'action' => $existingProductId ? 'update' : 'create',
+            'action' => empty($variantsBySku) ? 'skipped' : ($existingProductId ? 'update' : 'create'),
             'shopifyProductId' => $existingProductId,
             'variants' => array_map(fn (array $v) => $v['preview'], array_values($variantsBySku)),
+            'skippedAsForeignProduct' => $skippedAsForeignProduct,
         ];
 
-        if ($dryRun) {
+        if ($dryRun || empty($variantsBySku)) {
             return $groupPreview;
         }
 

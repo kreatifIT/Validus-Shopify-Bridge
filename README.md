@@ -214,7 +214,9 @@ foreach ($byKey as $key => $group) {
 }
 ```
 
-Until it's resolved, `sync-products` skips the affected group (see [above](#a-failing-product-doesnt-stop-the-rest-of-the-sync)) rather than failing the whole run or guessing which of the two to keep.
+If one of the two colliding codes already exists in Shopify as its **own separate product** - e.g. someone manually split it out before, or it's a special multi-bottle listing Validus' data doesn't distinguish from the single-bottle one - `sync-products` leaves that one alone and only syncs the rest of the group, instead of trying to also fold it in as a duplicate variant. This is logged as `Skipped product code(s) already listed as a separate Shopify product` and shown in `--dry-run` output; it's not a fix for the underlying ambiguity, just avoids clobbering an existing, presumably deliberate listing.
+
+That only helps once one side of the collision already has its own product, though - if **neither** code exists in Shopify yet, there's nothing to disambiguate by, and `productSet` still rejects the whole batch. In that case `sync-products` skips the affected group entirely (see [above](#a-failing-product-doesnt-stop-the-rest-of-the-sync)) rather than guessing which of the two to keep.
 
 ## Known open items
 
