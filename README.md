@@ -83,6 +83,19 @@ The route is protected by an HMAC signature check against `SHOPIFY_WEBHOOK_SECRE
 
 Once retries (real or Shopify's) are exhausted, a `Kreatif\ValidusShopifyBridge\Events\OrderExportFailed` event fires, carrying the Shopify order ID, the human-readable order number (e.g. `#A2`), and the exception. As with `ProductSyncGroupFailed`, the package doesn't notify anyone itself - bind a listener in the consuming app if you want an alert (email, Slack, ...).
 
+### Seeing exactly what was sent
+
+Every order export writes the exact JSON payload `ValidusClient::createOrder()` sends to `storage/app/validus-order-requests/<orderId>.json` (a retry overwrites it, so it's always the latest attempt) - useful to check against a Validus rejection without reconstructing the payload from the Shopify order by hand. Configurable via `config('validus-shopify.order_export')`:
+
+```php
+'order_export' => [
+    'request_log_disk' => env('VALIDUS_ORDER_EXPORT_REQUEST_LOG_DISK', 'local'),
+    'request_log_directory' => env('VALIDUS_ORDER_EXPORT_REQUEST_LOG_DIRECTORY', 'validus-order-requests'),
+],
+```
+
+The payload includes the customer's name, address, email and phone - set `request_log_disk` to `null` to turn this off if that shouldn't sit on disk for a given install.
+
 ### Discounts
 
 Each line item is sent with its original, pre-discount `unitPriceNet` (that's what Shopify's `line_items[].price` is). How the discount itself is reported depends on what it targets, read off Shopify's order-level `discount_applications[].target_selection`:

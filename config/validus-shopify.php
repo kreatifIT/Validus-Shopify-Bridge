@@ -130,4 +130,22 @@ return [
         'max_removed_ratio' => (float) env('VALIDUS_SHOPIFY_MAX_REMOVED_RATIO', 0.5),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Order export request logging
+    |--------------------------------------------------------------------------
+    |
+    | Every order export writes the exact JSON payload sent to Validus'
+    | POST /orders to <disk>/<directory>/<orderId>.json (overwritten on a
+    | retry) - useful to see exactly what was sent when Validus rejects an
+    | order, without reproducing it from the Shopify order data by hand. The
+    | payload includes customer name/address/email/phone - set disk to null
+    | to turn this off if that shouldn't sit on disk for this install.
+    |
+    */
+    'order_export' => [
+        'request_log_disk' => env('VALIDUS_ORDER_EXPORT_REQUEST_LOG_DISK', 'local'),
+        'request_log_directory' => env('VALIDUS_ORDER_EXPORT_REQUEST_LOG_DIRECTORY', 'validus-order-requests'),
+    ],
+
 ];
