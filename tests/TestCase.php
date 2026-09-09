@@ -35,6 +35,7 @@ abstract class TestCase extends Orchestra
         // Off by default so unrelated tests don't write files - tests for
         // this feature turn it back on with Storage::fake() explicitly.
         $app['config']->set('validus-shopify.order_export.request_log_disk', null);
+        $app['config']->set('validus-shopify.order_export.webhook_log_disk', null);
     }
 
     protected function defineDatabaseMigrations(): void
