@@ -85,10 +85,12 @@ Once retries (real or Shopify's) are exhausted, a `Kreatif\ValidusShopifyBridge\
 
 ### Seeing exactly what was sent
 
-Every order export writes two files, both keyed by the Shopify order id (a redelivery/retry overwrites its file, so it's always the latest attempt) - useful to compare what Shopify actually sent against what went to Validus, without reconstructing either from logs by hand:
+Every order export writes two files to the `local` disk, both keyed by the Shopify order id (a redelivery/retry overwrites its file, so it's always the latest attempt) - useful to compare what Shopify actually sent against what went to Validus, without reconstructing either from logs by hand:
 
-- `storage/app/validus-order-webhooks/<orderId>.json` - the raw `orders/paid` webhook payload, as Shopify sent it.
-- `storage/app/validus-order-requests/<orderId>.json` - the JSON payload `ValidusClient::createOrder()` sends to Validus.
+- `validus-order-webhooks/<orderId>.json` - the raw `orders/paid` webhook payload, as Shopify sent it.
+- `validus-order-requests/<orderId>.json` - the JSON payload `ValidusClient::createOrder()` sends to Validus.
+
+Where that actually lands on disk depends on the consuming app's own `local` disk root in `config/filesystems.php` - `storage/app/private/` by default on Laravel 11+, `storage/app/` on older apps. Check that config (or `Storage::disk('local')->path('')`) rather than assuming - don't take a file's absence at `storage/app/...` as this feature being broken.
 
 Configurable via `config('validus-shopify.order_export')`:
 

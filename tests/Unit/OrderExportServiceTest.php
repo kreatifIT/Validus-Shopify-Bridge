@@ -19,7 +19,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $service = new OrderExportService(['shopify_payments' => 'CC']);
@@ -59,7 +59,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $service = new OrderExportService(['shopify_payments' => 'CC']);
@@ -75,7 +75,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $order = $this->order();
@@ -116,7 +116,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $order = $this->order();
@@ -141,7 +141,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $order = $this->order();
@@ -181,7 +181,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $service = new OrderExportService(['shopify_payments' => 'CC']);
@@ -196,7 +196,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $order = $this->order();
@@ -226,7 +226,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $service = new OrderExportService([]); // no gateway mapped
