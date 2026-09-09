@@ -141,7 +141,7 @@ class OrderExportService
             $map = ProductMap::findByShopifyVariantId($variantId);
 
             if (! $map) {
-                throw MissingProductMappingException::forVariant($variantId);
+                throw MissingProductMappingException::forVariant($variantId, Arr::get($lineItem, 'name'), Arr::get($lineItem, 'sku'));
             }
 
             $items[] = $this->item($index, (int) $map->validus_id, $map->validus_code, $lineItem, $discountApplications);

@@ -11,8 +11,18 @@ use RuntimeException;
  */
 class MissingProductMappingException extends RuntimeException
 {
-    public static function forVariant(string $shopifyVariantId): self
+    /**
+     * $name/$sku come straight off the Shopify order line item (its "name"
+     * and "sku" fields) - the raw Shopify variant id alone isn't something
+     * anyone recognizes; the SKU is the Validus product code, so this is
+     * the closest thing to a Validus product number this failure can carry
+     * (there being no ProductMap entry is exactly why there isn't a real one).
+     */
+    public static function forVariant(string $shopifyVariantId, ?string $name, ?string $sku): self
     {
-        return new self("No Validus product mapping found for Shopify variant [{$shopifyVariantId}].");
+        $description = $name ?: 'unknown product';
+        $skuPart = $sku ? ", SKU {$sku}" : '';
+
+        return new self("No Validus product mapping found for \"{$description}\"{$skuPart} (Shopify variant [{$shopifyVariantId}]).");
     }
 }

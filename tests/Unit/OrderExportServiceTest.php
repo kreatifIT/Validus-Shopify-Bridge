@@ -97,9 +97,18 @@ class OrderExportServiceTest extends TestCase
         // never imported from Validus.
         $service = new OrderExportService(['shopify_payments' => 'CC']);
 
-        $this->expectException(MissingProductMappingException::class);
-
-        $service->buildPayload($this->order());
+        try {
+            $service->buildPayload($this->order());
+            $this->fail('Expected a MissingProductMappingException.');
+        } catch (MissingProductMappingException $e) {
+            // The raw Shopify variant id alone isn't enough to know what
+            // product this even is - the message needs to carry the
+            // product/variant name and SKU straight from the fixture's
+            // line item, not just [424242].
+            $this->assertStringContainsString('Demo Reserve 2021 - 0,75l', $e->getMessage());
+            $this->assertStringContainsString('99070121', $e->getMessage());
+            $this->assertStringContainsString('424242', $e->getMessage());
+        }
     }
 
     public function test_it_computes_a_line_items_discount_percent_from_shopifys_discount_allocations(): void
