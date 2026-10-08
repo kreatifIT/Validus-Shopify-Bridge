@@ -70,31 +70,89 @@ class OrderExportServiceTest extends TestCase
         $this->assertNull($payload['customer']['companyName']);
     }
 
-    public function test_an_order_with_a_company_name_on_the_billing_address_is_reported_as_a_company(): void
+    /**
+     * Validus rejects a company without a VAT number, and Shopify's checkout
+     * collects none - the company only goes on the shipping address.
+     */
+    public function test_a_company_without_a_vat_number_is_reported_as_a_private_person(): void
     {
-        ProductMap::query()->create([
-            'validus_id' => '101512',
-            'validus_code' => '99070121',
-            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
-        ]);
-
         $order = $this->order();
         // Shopify's standard checkout has no B2B toggle - a business
         // customer just fills the free-text "Company" field.
         $order['billing_address']['company'] = 'Ristorante Da Mario';
+        $order['shipping_address']['company'] = 'Ristorante Da Mario';
 
-        $service = new OrderExportService(['shopify_payments' => 'CC']);
+        $customer = $this->service()->buildPayload($order)['customer'];
 
-        $payload = $service->buildPayload($order);
-
-        $this->assertSame('company', $payload['customer']['type']);
-        $this->assertSame('Ristorante Da Mario', $payload['customer']['companyName']);
+        $this->assertSame('person', $customer['type']);
+        $this->assertNull($customer['companyName']);
+        $this->assertNull($customer['vatNumber']);
+        $this->assertSame('Hans', $customer['firstName']);
+        $this->assertSame('Müller', $customer['lastName']);
+        $this->assertSame('Tölzer Straße 15', $customer['billingAddress']['street']);
+        $this->assertSame('Ristorante Da Mario, Industriestraße 8', $customer['shippingAddress']['street']);
     }
 
-    /**
-     * What a real checkout sends: the order's and the customer's own phone
-     * are null, the number is only on the addresses.
-     */
+    public function test_a_company_only_on_the_billing_address_does_not_end_up_on_the_shipping_address(): void
+    {
+        $order = $this->order();
+        $order['billing_address']['company'] = 'Ristorante Da Mario';
+        $order['shipping_address']['company'] = '';
+
+        $customer = $this->service()->buildPayload($order)['customer'];
+
+        $this->assertSame('person', $customer['type']);
+        $this->assertSame('Industriestraße 8', $customer['shippingAddress']['street']);
+    }
+
+    public function test_a_company_with_a_vat_number_is_reported_as_a_company(): void
+    {
+        ProductMap::query()->firstOrCreate(['shopify_variant_id' => 'gid://shopify/ProductVariant/424242'], [
+            'validus_id' => '101512',
+            'validus_code' => '99070121',
+        ]);
+
+        $service = new class(['shopify_payments' => 'CC']) extends OrderExportService
+        {
+            protected function vatNumber(array $shopifyOrder): ?string
+            {
+                return 'IT01234567890';
+            }
+        };
+
+        $order = $this->order();
+        $order['billing_address']['company'] = 'Ristorante Da Mario';
+        $order['shipping_address']['company'] = 'Ristorante Da Mario';
+
+        $customer = $service->buildPayload($order)['customer'];
+
+        $this->assertSame('company', $customer['type']);
+        $this->assertSame('Ristorante Da Mario', $customer['companyName']);
+        $this->assertSame('IT01234567890', $customer['vatNumber']);
+        $this->assertSame('Ristorante Da Mario, Industriestraße 8', $customer['shippingAddress']['street']);
+    }
+
+    public function test_a_vat_number_without_a_company_name_stays_a_private_person(): void
+    {
+        ProductMap::query()->firstOrCreate(['shopify_variant_id' => 'gid://shopify/ProductVariant/424242'], [
+            'validus_id' => '101512',
+            'validus_code' => '99070121',
+        ]);
+
+        $service = new class(['shopify_payments' => 'CC']) extends OrderExportService
+        {
+            protected function vatNumber(array $shopifyOrder): ?string
+            {
+                return 'IT01234567890';
+            }
+        };
+
+        $customer = $service->buildPayload($this->order())['customer'];
+
+        $this->assertSame('person', $customer['type']);
+        $this->assertNull($customer['vatNumber']);
+    }
+
     public function test_the_phone_number_is_taken_from_the_billing_address_when_order_and_customer_have_none(): void
     {
         $order = $this->checkoutOrder();
