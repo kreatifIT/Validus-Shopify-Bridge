@@ -21,8 +21,21 @@ class ProductMap extends Model
         'shopify_variant_id',
     ];
 
+    /**
+     * $shopifyVariantId can be either the bare numeric id - what Shopify's
+     * REST "orders/paid" webhook gives as line_items[].variant_id - or the
+     * full gid://... string, which is what's actually stored here (it comes
+     * back that way from the GraphQL productSet mutation when the row is
+     * created). Without normalizing, an order webhook lookup would silently
+     * miss a real, correctly-synced mapping every time.
+     */
     public static function findByShopifyVariantId(string $shopifyVariantId): ?self
     {
-        return static::query()->where('shopify_variant_id', $shopifyVariantId)->first();
+        return static::query()->where('shopify_variant_id', static::toVariantGid($shopifyVariantId))->first();
+    }
+
+    protected static function toVariantGid(string $shopifyVariantId): string
+    {
+        return str_starts_with($shopifyVariantId, 'gid://') ? $shopifyVariantId : "gid://shopify/ProductVariant/{$shopifyVariantId}";
     }
 }

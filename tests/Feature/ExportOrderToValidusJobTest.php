@@ -23,7 +23,7 @@ class ExportOrderToValidusJobTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
     }
 
@@ -44,6 +44,27 @@ class ExportOrderToValidusJobTest extends TestCase
             && $request['orderId'] === '5551234');
 
         $this->assertTrue(ExportedOrder::alreadyExported('5551234'));
+        $this->assertSame('#A2', ExportedOrder::query()->where('shopify_order_id', '5551234')->value('shopify_order_number'));
+    }
+
+    public function test_an_order_without_a_number_is_recorded_without_one(): void
+    {
+        $this->mapTheFixtureLineItem();
+
+        Http::fake([
+            'validus.test/*' => Http::response(['success' => true], 200),
+        ]);
+
+        $order = $this->order();
+        unset($order['name']);
+
+        (new ExportOrderToValidusJob($order))->handle(
+            app(\Kreatif\ValidusShopifyBridge\Services\OrderExportService::class),
+            app(\Kreatif\ValidusShopifyBridge\Clients\ValidusClient::class),
+        );
+
+        $this->assertTrue(ExportedOrder::alreadyExported('5551234'));
+        $this->assertNull(ExportedOrder::query()->where('shopify_order_id', '5551234')->value('shopify_order_number'));
     }
 
     public function test_it_does_not_send_the_same_order_twice(): void

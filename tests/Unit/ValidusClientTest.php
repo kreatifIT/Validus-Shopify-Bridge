@@ -3,6 +3,7 @@
 namespace Kreatif\ValidusShopifyBridge\Tests\Unit;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Kreatif\ValidusShopifyBridge\Clients\ValidusClient;
 use Kreatif\ValidusShopifyBridge\Exceptions\ValidusApiException;
 use Kreatif\ValidusShopifyBridge\Tests\TestCase;
@@ -65,5 +66,44 @@ class ValidusClientTest extends TestCase
         $this->expectException(ValidusApiException::class);
 
         $this->client()->createOrder(['orderId' => '123']);
+    }
+
+    public function test_create_order_writes_the_exact_payload_to_the_configured_disk(): void
+    {
+        config(['validus-shopify.order_export.request_log_disk' => 'local']);
+        Storage::fake('local');
+        Http::fake(['validus.test/*' => Http::response(['success' => true])]);
+
+        $this->client()->createOrder(['orderId' => '123', 'orderNumber' => '#A2']);
+
+        Storage::disk('local')->assertExists('validus-order-requests/123.json');
+        $written = json_decode(Storage::disk('local')->get('validus-order-requests/123.json'), true);
+        $this->assertSame('#A2', $written['orderNumber']);
+    }
+
+    public function test_create_order_overwrites_the_file_from_a_previous_attempt_for_the_same_order(): void
+    {
+        config(['validus-shopify.order_export.request_log_disk' => 'local']);
+        Storage::fake('local');
+        Storage::disk('local')->put('validus-order-requests/123.json', 'stale attempt');
+        Http::fake(['validus.test/*' => Http::response(['success' => true])]);
+
+        $this->client()->createOrder(['orderId' => '123', 'orderNumber' => '#A2 retried']);
+
+        $written = json_decode(Storage::disk('local')->get('validus-order-requests/123.json'), true);
+        $this->assertSame('#A2 retried', $written['orderNumber']);
+    }
+
+    public function test_create_order_writes_nothing_when_the_disk_is_not_configured(): void
+    {
+        // TestCase's defineEnvironment() already sets this to null, but
+        // assert it explicitly here rather than relying on that default.
+        config(['validus-shopify.order_export.request_log_disk' => null]);
+        Storage::fake('local');
+        Http::fake(['validus.test/*' => Http::response(['success' => true])]);
+
+        $this->client()->createOrder(['orderId' => '123']);
+
+        Storage::disk('local')->assertDirectoryEmpty('validus-order-requests');
     }
 }

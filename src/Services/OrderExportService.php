@@ -92,13 +92,37 @@ class OrderExportService
             // Shopify's default checkout. Optional on Validus' side, so
             // always sending null is fine as-is.
             'fiscalId' => null,
-            'firstName' => Arr::get($customer, 'first_name', Arr::get($billing, 'first_name')),
-            'lastName' => Arr::get($customer, 'last_name', Arr::get($billing, 'last_name')),
-            'email' => Arr::get($shopifyOrder, 'email', Arr::get($customer, 'email')),
-            'phone' => Arr::get($shopifyOrder, 'phone', Arr::get($customer, 'phone')),
+            'firstName' => $this->firstFilled(Arr::get($customer, 'first_name'), Arr::get($billing, 'first_name'), Arr::get($shipping, 'first_name')),
+            'lastName' => $this->firstFilled(Arr::get($customer, 'last_name'), Arr::get($billing, 'last_name'), Arr::get($shipping, 'last_name')),
+            'email' => $this->firstFilled(Arr::get($shopifyOrder, 'email'), Arr::get($shopifyOrder, 'contact_email'), Arr::get($customer, 'email')),
+            // Shopify's checkout stores the phone number on the addresses only -
+            // the order's and the customer's own "phone" stay empty unless the
+            // customer signed up by phone or has one on their account.
+            'phone' => $this->firstFilled(
+                Arr::get($shopifyOrder, 'phone'),
+                Arr::get($customer, 'phone'),
+                Arr::get($billing, 'phone'),
+                Arr::get($shipping, 'phone'),
+            ),
             'billingAddress' => $this->address($billing),
             'shippingAddress' => $this->address($shipping),
         ];
+    }
+
+    /**
+     * The first value that is not empty. Shopify sends fields it has no value
+     * for as null rather than leaving them out, so Arr::get()'s default never
+     * kicks in for them.
+     */
+    protected function firstFilled(mixed ...$values): ?string
+    {
+        foreach ($values as $value) {
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -141,7 +165,7 @@ class OrderExportService
             $map = ProductMap::findByShopifyVariantId($variantId);
 
             if (! $map) {
-                throw MissingProductMappingException::forVariant($variantId);
+                throw MissingProductMappingException::forVariant($variantId, Arr::get($lineItem, 'name'), Arr::get($lineItem, 'sku'));
             }
 
             $items[] = $this->item($index, (int) $map->validus_id, $map->validus_code, $lineItem, $discountApplications);

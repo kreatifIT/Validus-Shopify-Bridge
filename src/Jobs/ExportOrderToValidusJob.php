@@ -43,6 +43,7 @@ class ExportOrderToValidusJob implements ShouldQueue
 
         ExportedOrder::query()->create([
             'shopify_order_id' => $orderId,
+            'shopify_order_number' => Arr::get($this->shopifyOrder, 'name'),
             'exported_at' => now(),
         ]);
     }

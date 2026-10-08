@@ -97,7 +97,7 @@ class ProductWriter
                 'ignoreCompareQuantity' => true,
                 'quantities' => [[
                     'inventoryItemId' => $inventoryItemId,
-                    'locationId' => $locationId,
+                    'locationId' => $this->locationGid($locationId),
                     'quantity' => $quantity,
                 ]],
             ],
@@ -106,6 +106,19 @@ class ProductWriter
         if ($errors = Arr::get($data, 'inventorySetQuantities.userErrors')) {
             throw ShopifyApiException::userErrors('inventorySetQuantities', $errors);
         }
+    }
+
+    /**
+     * Unlike every other id this class sends (always read back from a prior
+     * Shopify response, already a gid://... string), the location id comes
+     * straight from config('validus-shopify.shopify.location_id') - a
+     * human typed it in, most likely as the bare numeric id copied from
+     * Shopify Admin's URL rather than the full GID from a locations query.
+     * Accept either.
+     */
+    protected function locationGid(string $locationId): string
+    {
+        return str_starts_with($locationId, 'gid://') ? $locationId : "gid://shopify/Location/{$locationId}";
     }
 
     /**

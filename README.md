@@ -39,6 +39,8 @@ VALIDUS_SHOPIFY_LOCATION_ID=
 query { locations(first: 5) { nodes { id name } } }
 ```
 
+Either the bare numeric id (as it appears in the Shopify Admin URL) or the full `gid://shopify/Location/...` string from that query works - the package normalizes it either way.
+
 ### Product code format
 
 `config('validus-shopify.grouping')` controls how `code.code` (e.g. `"56070025"`) is split into a grouping key and a vintage year. The defaults assume a common layout: first 2 digits = product, last 2 digits = vintage (with a `20` century prefix). The digits in between are intentionally ignored - bottle size/format comes from the separate `code.bottleCapacity` + `code.measureUnit` API fields instead. Confirm the exact digit layout with your customer; if their Validus code scheme doesn't fit this pattern at all, supply your own `Kreatif\ValidusShopifyBridge\Grouping\VariantGroupingStrategy` implementation and bind it in your own service provider instead of `ProductCodeGroupingStrategy`.
@@ -80,6 +82,29 @@ The route is protected by an HMAC signature check against `SHOPIFY_WEBHOOK_SECRE
 `ExportOrderToValidusJob` retries a failed export up to 5 times with a backoff (10s, 30s, 60s, 5m, 15m) - but that only actually happens on a real queue with a worker running (`database`, `redis`, ...). On `QUEUE_CONNECTION=sync` (Laravel's default, and a common choice for a small store), there is no queue to retry from: the job runs once, synchronously, inside the webhook request, and a failure is returned to Shopify as a non-2xx response - Shopify's own webhook redelivery becomes the only retry mechanism at that point. Point `QUEUE_CONNECTION` at a real driver with a worker process if you want this package's own retry/backoff to do anything.
 
 Once retries (real or Shopify's) are exhausted, a `Kreatif\ValidusShopifyBridge\Events\OrderExportFailed` event fires, carrying the Shopify order ID, the human-readable order number (e.g. `#A2`), and the exception. As with `ProductSyncGroupFailed`, the package doesn't notify anyone itself - bind a listener in the consuming app if you want an alert (email, Slack, ...).
+
+### Seeing exactly what was sent
+
+Every order export writes two files to the `local` disk, both keyed by the Shopify order id (a redelivery/retry overwrites its file, so it's always the latest attempt) - useful to compare what Shopify actually sent against what went to Validus, without reconstructing either from logs by hand:
+
+- `validus-order-webhooks/<orderId>.json` - the raw `orders/paid` webhook payload, as Shopify sent it.
+- `validus-order-requests/<orderId>.json` - the JSON payload `ValidusClient::createOrder()` sends to Validus.
+
+Where that actually lands on disk depends on the consuming app's own `local` disk root in `config/filesystems.php` - `storage/app/private/` by default on Laravel 11+, `storage/app/` on older apps. Check that config (or `Storage::disk('local')->path('')`) rather than assuming - don't take a file's absence at `storage/app/...` as this feature being broken.
+
+Configurable via `config('validus-shopify.order_export')`:
+
+```php
+'order_export' => [
+    'webhook_log_disk' => env('VALIDUS_ORDER_EXPORT_WEBHOOK_LOG_DISK', 'local'),
+    'webhook_log_directory' => env('VALIDUS_ORDER_EXPORT_WEBHOOK_LOG_DIRECTORY', 'validus-order-webhooks'),
+
+    'request_log_disk' => env('VALIDUS_ORDER_EXPORT_REQUEST_LOG_DISK', 'local'),
+    'request_log_directory' => env('VALIDUS_ORDER_EXPORT_REQUEST_LOG_DIRECTORY', 'validus-order-requests'),
+],
+```
+
+Both contain the customer's name, address, email and phone - set the respective `*_log_disk` to `null` to turn either off if that shouldn't sit on disk for a given install.
 
 ### Discounts
 
@@ -212,7 +237,9 @@ foreach ($byKey as $key => $group) {
 }
 ```
 
-Until it's resolved, `sync-products` skips the affected group (see [above](#a-failing-product-doesnt-stop-the-rest-of-the-sync)) rather than failing the whole run or guessing which of the two to keep.
+If one of the two colliding codes already exists in Shopify as its **own separate product** - e.g. someone manually split it out before, or it's a special multi-bottle listing Validus' data doesn't distinguish from the single-bottle one - `sync-products` leaves that one alone and only syncs the rest of the group, instead of trying to also fold it in as a duplicate variant. This is logged as `Skipped product code(s) already listed as a separate Shopify product` and shown in `--dry-run` output; it's not a fix for the underlying ambiguity, just avoids clobbering an existing, presumably deliberate listing.
+
+That only helps once one side of the collision already has its own product, though - if **neither** code exists in Shopify yet, there's nothing to disambiguate by, and `productSet` still rejects the whole batch. In that case `sync-products` skips the affected group entirely (see [above](#a-failing-product-doesnt-stop-the-rest-of-the-sync)) rather than guessing which of the two to keep.
 
 ## Known open items
 

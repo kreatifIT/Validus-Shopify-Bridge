@@ -130,4 +130,28 @@ return [
         'max_removed_ratio' => (float) env('VALIDUS_SHOPIFY_MAX_REMOVED_RATIO', 0.5),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Order export request/webhook logging
+    |--------------------------------------------------------------------------
+    |
+    | Every order export writes two JSON files, both keyed by the Shopify
+    | order id (a redelivery/retry overwrites its file, so it's always the
+    | latest attempt) - useful to see exactly what Shopify sent and what
+    | actually went to Validus when an order gets rejected, without
+    | reproducing either by hand:
+    | - webhook_log_*: the raw "orders/paid" payload, as Shopify sent it.
+    | - request_log_*: the JSON payload sent to Validus' POST /orders.
+    | Both contain customer name/address/email/phone - set the respective
+    | disk to null to turn either off if that shouldn't sit on disk here.
+    |
+    */
+    'order_export' => [
+        'webhook_log_disk' => env('VALIDUS_ORDER_EXPORT_WEBHOOK_LOG_DISK', 'local'),
+        'webhook_log_directory' => env('VALIDUS_ORDER_EXPORT_WEBHOOK_LOG_DIRECTORY', 'validus-order-webhooks'),
+
+        'request_log_disk' => env('VALIDUS_ORDER_EXPORT_REQUEST_LOG_DISK', 'local'),
+        'request_log_directory' => env('VALIDUS_ORDER_EXPORT_REQUEST_LOG_DIRECTORY', 'validus-order-requests'),
+    ],
+
 ];

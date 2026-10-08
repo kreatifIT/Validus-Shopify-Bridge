@@ -19,7 +19,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $service = new OrderExportService(['shopify_payments' => 'CC']);
@@ -59,7 +59,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $service = new OrderExportService(['shopify_payments' => 'CC']);
@@ -75,7 +75,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $order = $this->order();
@@ -91,15 +91,116 @@ class OrderExportServiceTest extends TestCase
         $this->assertSame('Ristorante Da Mario', $payload['customer']['companyName']);
     }
 
+    /**
+     * What a real checkout sends: the order's and the customer's own phone
+     * are null, the number is only on the addresses.
+     */
+    public function test_the_phone_number_is_taken_from_the_billing_address_when_order_and_customer_have_none(): void
+    {
+        $order = $this->checkoutOrder();
+        $order['billing_address']['phone'] = '340 1234567';
+        $order['shipping_address']['phone'] = '+39 333 7654321';
+
+        $payload = $this->service()->buildPayload($order);
+
+        $this->assertSame('340 1234567', $payload['customer']['phone']);
+    }
+
+    public function test_the_phone_number_is_taken_from_the_shipping_address_when_the_billing_address_has_none(): void
+    {
+        $order = $this->checkoutOrder();
+        $order['billing_address']['phone'] = null;
+        $order['shipping_address']['phone'] = '0160 1234567';
+
+        $payload = $this->service()->buildPayload($order);
+
+        $this->assertSame('0160 1234567', $payload['customer']['phone']);
+    }
+
+    public function test_the_order_phone_number_comes_first(): void
+    {
+        $order = $this->order();
+        $order['billing_address']['phone'] = '340 1234567';
+
+        $payload = $this->service()->buildPayload($order);
+
+        $this->assertSame('+49 30 12345678', $payload['customer']['phone']);
+    }
+
+    public function test_an_order_without_any_phone_number_reports_none(): void
+    {
+        $payload = $this->service()->buildPayload($this->checkoutOrder());
+
+        $this->assertNull($payload['customer']['phone']);
+    }
+
+    public function test_the_email_falls_back_to_the_contact_email_and_then_the_customer(): void
+    {
+        $order = $this->checkoutOrder();
+        $order['email'] = null;
+        $order['contact_email'] = 'contact@muster.de';
+
+        $this->assertSame('contact@muster.de', $this->service()->buildPayload($order)['customer']['email']);
+
+        $order['contact_email'] = '';
+
+        $this->assertSame('h.mueller@muster.de', $this->service()->buildPayload($order)['customer']['email']);
+    }
+
+    public function test_the_name_falls_back_to_the_billing_address_when_the_customer_has_none(): void
+    {
+        $order = $this->checkoutOrder();
+        $order['customer']['first_name'] = null;
+        $order['customer']['last_name'] = '';
+
+        $payload = $this->service()->buildPayload($order);
+
+        $this->assertSame('Hans', $payload['customer']['firstName']);
+        $this->assertSame('Müller', $payload['customer']['lastName']);
+    }
+
+    /**
+     * The fixture with Shopify's empty fields as a real checkout sends them.
+     *
+     * @return array<string, mixed>
+     */
+    protected function checkoutOrder(): array
+    {
+        $order = $this->order();
+        $order['phone'] = null;
+        $order['customer']['phone'] = null;
+
+        return $order;
+    }
+
+    protected function service(): OrderExportService
+    {
+        ProductMap::query()->firstOrCreate(['shopify_variant_id' => 'gid://shopify/ProductVariant/424242'], [
+            'validus_id' => '101512',
+            'validus_code' => '99070121',
+        ]);
+
+        return new OrderExportService(['shopify_payments' => 'CC']);
+    }
+
     public function test_it_refuses_to_build_a_payload_for_an_unmapped_line_item(): void
     {
         // No ProductMap row created - simulates a Shopify product that was
         // never imported from Validus.
         $service = new OrderExportService(['shopify_payments' => 'CC']);
 
-        $this->expectException(MissingProductMappingException::class);
-
-        $service->buildPayload($this->order());
+        try {
+            $service->buildPayload($this->order());
+            $this->fail('Expected a MissingProductMappingException.');
+        } catch (MissingProductMappingException $e) {
+            // The raw Shopify variant id alone isn't enough to know what
+            // product this even is - the message needs to carry the
+            // product/variant name and SKU straight from the fixture's
+            // line item, not just [424242].
+            $this->assertStringContainsString('Demo Reserve 2021 - 0,75l', $e->getMessage());
+            $this->assertStringContainsString('99070121', $e->getMessage());
+            $this->assertStringContainsString('424242', $e->getMessage());
+        }
     }
 
     public function test_it_computes_a_line_items_discount_percent_from_shopifys_discount_allocations(): void
@@ -107,7 +208,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $order = $this->order();
@@ -132,7 +233,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $order = $this->order();
@@ -172,7 +273,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $service = new OrderExportService(['shopify_payments' => 'CC']);
@@ -187,7 +288,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $order = $this->order();
@@ -217,7 +318,7 @@ class OrderExportServiceTest extends TestCase
         ProductMap::query()->create([
             'validus_id' => '101512',
             'validus_code' => '99070121',
-            'shopify_variant_id' => '424242',
+            'shopify_variant_id' => 'gid://shopify/ProductVariant/424242',
         ]);
 
         $service = new OrderExportService([]); // no gateway mapped
