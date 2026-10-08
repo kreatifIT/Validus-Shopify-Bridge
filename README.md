@@ -117,7 +117,12 @@ The order-level `discountAmount` is Shopify's `total_discounts` as-is either way
 
 ### Business customers
 
-Standard Shopify checkout (i.e. not the Shopify Plus B2B feature - a separate, paid-tier concept with its own company accounts and wholesale checkout) has no "is this a business" toggle. The only signal available is whatever the customer typed into the free-text **Company** field on their billing (falling back to shipping) address: if it's non-empty, `customer.type` is reported as `"company"` with that value as `companyName`; otherwise `"person"` with `companyName: null`. There's no VAT-number field anywhere in checkout or account, so `vatNumber` is always sent as null - same situation as `fiscalId` (see [Known open items](#known-open-items)).
+Standard Shopify checkout (i.e. not the Shopify Plus B2B feature - a separate, paid-tier concept with its own company accounts and wholesale checkout) has no "is this a business" toggle. The only signal available is whatever the customer typed into the free-text **Company** field on their billing (falling back to shipping) address.
+
+Validus rejects a company without a VAT number (`Per type company specificare vatNumber`), and there's no VAT-number field anywhere in checkout or account. So:
+
+- **Without a VAT number** (always, with Shopify's standard checkout): `customer.type` is `"person"`, `companyName` and `vatNumber` are null. The company only appears on the shipping address, in front of the street (`"Ristorante Da Mario, Via Roma 1"`) - Validus' addresses have no field of their own for it.
+- **With a VAT number** - only if a subclass overrides `OrderExportService::vatNumber()`, e.g. to read it from a cart attribute: `"company"` with the company name and VAT number. The shipping address carries the company in front of the street either way.
 
 ## Running the product sync
 

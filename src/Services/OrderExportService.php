@@ -27,9 +27,11 @@ use Kreatif\ValidusShopifyBridge\Models\ProductMap;
  *   Shopify's checkout doesn't collect it, and it's optional on Validus'
  *   side, so this is not a defect to fix, just a known limitation.
  * - vatNumber is always null too, same reason - no such field anywhere in
- *   checkout or account. customer.type/companyName ARE derived (from the
- *   billing/shipping address' free-text "Company" field - the only "is this
- *   a business" signal standard, non-Plus Shopify checkout has), see customer().
+ *   checkout or account; a subclass can supply one, see vatNumber(). Validus
+ *   rejects a company without a VAT number ("Per type company specificare
+ *   vatNumber"), so without one the customer goes out as a private person
+ *   and the free-text "Company" field only ends up on the shipping address,
+ *   see customer().
  * - additional payment methods beyond what's in payment_code_map (throws too)
  */
 class OrderExportService
@@ -78,16 +80,18 @@ class OrderExportService
         // toggle (that's a Shopify Plus B2B feature) - a business customer
         // just fills the free-text "Company" field on their address, same
         // as a private one leaving it blank. That's the only signal we have.
-        $companyName = Arr::get($billing, 'company') ?: Arr::get($shipping, 'company');
+        // Validus only takes a company together with its VAT number, so
+        // without one the order goes out as a private person.
+        $companyName = $this->firstFilled(Arr::get($billing, 'company'), Arr::get($shipping, 'company'));
+        $vatNumber = $this->vatNumber($shopifyOrder);
+        $isCompany = $companyName !== null && $vatNumber !== null;
 
         return [
             'customerId' => (string) Arr::get($customer, 'id', ''),
             'countryCode' => Arr::get($billing, 'country_code'),
-            'type' => $companyName ? 'company' : 'person',
-            'companyName' => $companyName ?: null,
-            // Not collected anywhere (no VAT-number field in checkout or
-            // account) - always null until/unless one gets added.
-            'vatNumber' => null,
+            'type' => $isCompany ? 'company' : 'person',
+            'companyName' => $isCompany ? $companyName : null,
+            'vatNumber' => $isCompany ? $vatNumber : null,
             // Codice Fiscale for Italian customers - not collected by
             // Shopify's default checkout. Optional on Validus' side, so
             // always sending null is fine as-is.
@@ -105,8 +109,41 @@ class OrderExportService
                 Arr::get($shipping, 'phone'),
             ),
             'billingAddress' => $this->address($billing),
-            'shippingAddress' => $this->address($shipping),
+            'shippingAddress' => $this->withCompany($this->address($shipping), Arr::get($shipping, 'company')),
         ];
+    }
+
+    /**
+     * The customer's VAT number. Shopify's standard checkout doesn't collect
+     * one, so there is none unless a subclass reads it from wherever a shop
+     * collects it (e.g. a cart attribute).
+     *
+     * @param  array<string, mixed>  $shopifyOrder
+     */
+    protected function vatNumber(array $shopifyOrder): ?string
+    {
+        return null;
+    }
+
+    /**
+     * Puts the company the goods go to in front of the street, so it reaches
+     * the delivery whether or not the customer goes out as a company - an
+     * address has no field of its own for it.
+     *
+     * @param  array<string, mixed>  $address  As built by address().
+     * @return array<string, mixed>
+     */
+    protected function withCompany(array $address, mixed $company): array
+    {
+        $company = $this->firstFilled($company);
+
+        if ($company === null) {
+            return $address;
+        }
+
+        $address['street'] = trim($company.', '.$address['street'], ', ');
+
+        return $address;
     }
 
     /**
