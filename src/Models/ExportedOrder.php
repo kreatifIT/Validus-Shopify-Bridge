@@ -6,13 +6,14 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * @property string $shopify_order_id
+ * @property string|null $shopify_order_number
  * @property \Illuminate\Support\Carbon $exported_at
  */
 class ExportedOrder extends Model
 {
     protected $table = 'validus_shopify_exported_orders';
 
-    protected $fillable = ['shopify_order_id', 'exported_at'];
+    protected $fillable = ['shopify_order_id', 'shopify_order_number', 'exported_at'];
 
     protected function casts(): array
     {
