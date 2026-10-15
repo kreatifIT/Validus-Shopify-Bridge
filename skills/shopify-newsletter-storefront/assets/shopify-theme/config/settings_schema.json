@@ -1,0 +1,21 @@
+[
+  {
+    "name": "theme_info",
+    "theme_name": "Headless Redirect",
+    "theme_version": "1.1.0",
+    "theme_author": "Kreatif",
+    "theme_documentation_url": "https://www.kreatif.it",
+    "theme_support_email": "support@kreatif.it"
+  },
+  {
+    "name": "Website",
+    "settings": [
+      {
+        "type": "url",
+        "id": "website_url",
+        "label": "Website (headless front end)",
+        "info": "Every page of this online store redirects to the same path there, which maps Shopify's paths (/products, /collections, /cart) itself. Required - without it the theme sends everyone to www.example.com"
+      }
+    ]
+  }
+]

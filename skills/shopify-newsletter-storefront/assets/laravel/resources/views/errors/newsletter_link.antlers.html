@@ -1,0 +1,31 @@
+{{#
+  @name Error: newsletter link
+  @desc The page behind an altered or expired newsletter confirmation link.
+        NewsletterController::confirm() renders it with status 403 in the
+        language the visitor signed up in; `home_url` is that language's home page.
+#}}
+
+<!-- /errors/newsletter_link.antlers.html -->
+{{ headline = {trans:strings.newsletter_link_title} }}
+{{ hide_breadcrumb = true }}
+<main class="" id="content">
+  <section class="module-hero-small hero-module-hero-small module-hero-default">
+    {{ partial src="modules/hero_small/hero_small" }}
+  </section>
+  {{# The text sits here, not in the hero: the hero clamps it to three lines.
+      Same white wrapper as page_builder/section_content gives every module -
+      below xl the body itself is black. #}}
+  <section class="module mb-4 md:mb-8 xl:mb-12 2xl:mb-32">
+    <div class="outer-wrapper">
+      <div class="diagonal-corners bg-white section-padding section-padding__text">
+        <div class="outer-wrapper-spaced relative flex flex-col items-start gap-8">
+          <p class="k-secondary-book-xl max-w-[720px]">{{ trans:strings.newsletter_link_text }}</p>
+          <div>
+            {{ partial:components/button as="a" button_type="primary" :url="home_url" label="{{ trans:strings.newsletter_link_button }}" link_type="" product_link="" }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<!-- End: /errors/newsletter_link.antlers.html -->

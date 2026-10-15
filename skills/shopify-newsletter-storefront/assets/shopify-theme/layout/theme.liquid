@@ -1,0 +1,77 @@
+{%- comment -%}
+  Redirect theme for the headless setup. The online store only exists so
+  that Shopify can generate links (Shopify Email, order mails, discount
+  links, newsletter tools); every page sends the visitor on to the same
+  path on the website.
+
+  The website maps Shopify's paths itself (ShopifyStorefrontController in
+  the website's repository): /products/{handle} to /product/{handle} with
+  ?variant= preselected, /collections and /cart to /shop, /it and /en kept.
+  So the mapping lives in one place and this theme stays a plain hand-over.
+
+  A discount link (/discount/CODE?redirect=…) is answered by Shopify itself:
+  it keeps the code in the discount_code cookie and redirects here. The code
+  goes along as ?discount=CODE, the website puts it on the cart.
+
+  Shop policies and gift cards render here, they have no page on the website.
+  Shopify's bot check and queue pages (/checkpoint, /challenge,
+  /throttle/queue) and the theme editor are left alone as well.
+{%- endcomment -%}
+{%- liquid
+  assign website = settings.website_url | default: 'https://www.example.com'
+  assign last_char = website | slice: -1
+  if last_char == '/'
+    assign length = website.size | minus: 1
+    assign website = website | slice: 0, length
+  endif
+
+  assign redirect = true
+  if request.design_mode or request.page_type == 'policy' or request.page_type == 'gift_card'
+    assign redirect = false
+  endif
+
+  assign fallback = website | append: request.path
+-%}
+<!doctype html>
+<html lang="{{ request.locale.iso_code }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title>{{ page_title | default: shop.name }}</title>
+    {%- if redirect -%}
+      {%- comment -%} Only without JavaScript: it cannot carry the query string or the discount code. {%- endcomment -%}
+      <noscript><meta http-equiv="refresh" content="0; url={{ fallback | escape }}"></noscript>
+      <script>
+        (function () {
+          var path = window.location.pathname;
+
+          if (path === '/checkpoint' || path === '/challenge' || path === '/throttle/queue') {
+            return;
+          }
+
+          var target = new URL(path + window.location.search, {{ website | json }});
+          var discount = document.cookie.match(/(?:^|;\s*)discount_code=([^;]*)/);
+
+          if (discount) {
+            target.searchParams.set('discount', decodeURIComponent(discount[1]));
+            document.cookie = 'discount_code=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT';
+          }
+
+          window.location.replace(target.toString());
+        })();
+      </script>
+    {%- endif -%}
+    {{ content_for_header }}
+    <style>
+      body { margin: 0; padding: 2rem; font: 16px/1.5 system-ui, sans-serif; color: #222321; }
+      a { color: #222321; }
+    </style>
+  </head>
+  <body>
+    {%- if redirect -%}
+      <p><a href="{{ fallback | escape }}">{{ fallback | escape }}</a></p>
+    {%- endif -%}
+    {{ content_for_layout }}
+  </body>
+</html>

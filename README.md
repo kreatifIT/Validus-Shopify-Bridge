@@ -259,6 +259,8 @@ Not open items, just known, permanent limitations - not bugs to fix: Italian cus
 
 `skills/validus-shopify-bridge/SKILL.md` covers the failure modes in this README that are easy to misdiagnose as a code bug (missing Shopify API scopes, an option-name mismatch, a Validus-side config error, colliding product codes, ...). If you use Claude Code on a project that installs this package, copy that file to `.claude/skills/validus-shopify-bridge/SKILL.md` in the project so Claude picks it up automatically - composer packages aren't scanned for skills on their own.
 
+`skills/shopify-newsletter-storefront/` is a setup recipe built on this package's Shopify connection: newsletter sign-ups saved as Shopify customers via an own double opt-in, a redirect theme for the headless online store, website routes for Shopify's `/products`, `/collections`, `/cart` and `/discount` links, and discount codes from those links applied to the cart - so newsletters can be sent from Shopify Messaging. It brings the tested code from the first project as templates (`assets/`). Copy the whole folder to `.claude/skills/shopify-newsletter-storefront/` in the project.
+
 ## Testing
 
 ```bash

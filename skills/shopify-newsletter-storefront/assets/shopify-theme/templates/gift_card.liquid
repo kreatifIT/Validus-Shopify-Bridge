@@ -1,0 +1,5 @@
+{%- comment -%} The only page a customer may really land on here: the gift card from its e-mail. {%- endcomment -%}
+<h1>{{ 'gift_card.title' | t }}</h1>
+<p><strong>{{ gift_card.code | format_code }}</strong></p>
+<p>{{ 'gift_card.balance' | t }}: {{ gift_card.balance | money }}</p>
+<p><a href="{{ settings.website_url | default: 'https://www.example.com' }}">{{ shop.name }}</a></p>

@@ -1,0 +1,81 @@
+              {{ /if }}
+            </div>
+          {{ /if }}
+          {{#
+            Layout per Figma 6293:19652. Posts to NewsletterController, which mails
+            the double opt-in link (resources/js/kreatif/app/newsletter.js).
+            reCAPTCHA is loaded on the first interaction, not with every page.
+          #}}
+          {{ _recaptcha_site_key = {config:services:recaptcha:site_key} }}
+          <form
+            class="flex flex-col gap-6"
+            action="/!/newsletter"
+            method="post"
+            x-data="newsletterForm"
+            x-on:submit.prevent="submit"
+            x-on:focusin.once="prepare"
+            {{ if _recaptcha_site_key }}data-recaptcha-site-key="{{ _recaptcha_site_key }}"{{ /if }}
+          >
+            {{ csrf_field }}
+            <input type="hidden" name="site" value="{{ site:handle }}" />
+            <div class="hidden" aria-hidden="true">
+              <input type="text" name="website" tabindex="-1" autocomplete="off" />
+            </div>
+            <div class="flex flex-col gap-6 md:flex-row">
+              <div class="flex-1">
+                <label class="sr-only" for="newsletter-first-name">{{ trans:labels.form_label_first_name }}</label>
+                <input
+                  id="newsletter-first-name"
+                  name="first_name"
+                  type="text"
+                  autocomplete="given-name"
+                  placeholder="{{ trans:labels.form_label_first_name }}"
+                  class="k-secondary-book-xl h-[48px] w-full rounded-[8px] border-black-50 bg-white px-4 py-2 caret-primary placeholder:text-black-charcoal-grey focus:border-black-charcoal-grey md:px-6"
+                />
+              </div>
+              <div class="flex-1">
+                <label class="sr-only" for="newsletter-last-name">{{ trans:labels.form_label_last_name }}</label>
+                <input
+                  id="newsletter-last-name"
+                  name="last_name"
+                  type="text"
+                  autocomplete="family-name"
+                  placeholder="{{ trans:labels.form_label_last_name }}"
+                  class="k-secondary-book-xl h-[48px] w-full rounded-[8px] border-black-50 bg-white px-4 py-2 caret-primary placeholder:text-black-charcoal-grey focus:border-black-charcoal-grey md:px-6"
+                />
+              </div>
+              <div class="flex-1">
+                <label class="sr-only" for="newsletter-email">{{ trans:labels.form_label_email }}</label>
+                <input
+                  id="newsletter-email"
+                  name="email"
+                  type="email"
+                  autocomplete="email"
+                  required
+                  placeholder="{{ trans:labels.form_label_email }} *"
+                  class="k-secondary-book-xl h-[48px] w-full rounded-[8px] border-black-50 bg-white px-4 py-2 caret-primary placeholder:text-black-charcoal-grey focus:border-black-charcoal-grey md:px-6"
+                />
+              </div>
+            </div>
+            <div class="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+              <label class="flex items-center gap-[10px]">
+                <input name="consent" type="checkbox" value="1" required class="h-[32px] w-[32px] shrink-0" />
+                <span class="k-secondary-book-sm text-black-black">{{ trans:labels.form_label_consent }} *</span>
+              </label>
+              {{ partial:components/button as="button" button_type="inline" label="{trans:labels.form_submit}" class="self-start md:self-center"  link_type="" product_link="" }}
+                {{ slot:attributes }}
+                  type="submit" :disabled="sending"
+                {{ /slot:attributes }}
+              {{ /partial:components/button }}
+            </div>
+            <div aria-live="polite">
+              <p class="k-secondary-book-xl" x-show="status === 'success'" x-cloak>{{ trans:labels.newsletter_success }}</p>
+              <p class="k-secondary-book-xl text-red" x-show="status === 'invalid'" x-cloak>{{ trans:labels.form_error }}</p>
+              <p class="k-secondary-book-xl text-red" x-show="status === 'error'" x-cloak>{{ trans:labels.newsletter_error }}</p>
+            </div>
+            {{# The reCAPTCHA badge is hidden (css/modules/forms.css), which Google allows only with this notice. #}}
+            {{ if _recaptcha_site_key }}
+              <p class="k-secondary-book-sm recaptcha-notice text-black-50">{{ trans:labels.recaptcha_notice }}</p>
+            {{ /if }}
+          </form>
+        </div>

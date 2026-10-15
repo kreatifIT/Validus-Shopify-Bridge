@@ -1,0 +1,15 @@
+{{#
+    @name Newsletter confirmation text
+    @desc The double opt-in mail of a newsletter sign-up (App\Mail\NewsletterConfirmation).
+#}}
+
+{{ trans:strings.form_mail_greeting }},
+
+{{ trans:strings.newsletter_mail_body }}
+
+{{ confirmation_url }}
+
+{{ trans:strings.newsletter_mail_validity :days="valid_days" }}
+
+{{ trans:strings.form_mail_closing }},
+{{ trans:strings.form_mail_from }}
