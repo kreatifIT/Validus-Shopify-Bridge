@@ -65,7 +65,7 @@ class NewsletterSubscriptionTest extends TestCase
         $this->freezeSecond();
         $this->postJson('/!/newsletter', $this->signUp(['site' => 'it']))->assertOk();
 
-        $this->get($this->confirmationUrl())->assertRedirect(Site::get('it')->absoluteUrl());
+        $this->get($this->confirmationUrl())->assertRedirect(Site::get('it')->absoluteUrl().'?newsletter=confirmed');
 
         Queue::assertPushed(SubscribeToNewsletter::class, fn (SubscribeToNewsletter $job) => $job->signup->email === 'anna@example.com'
             && $job->signup->firstName === 'Anna'
@@ -78,7 +78,25 @@ class NewsletterSubscriptionTest extends TestCase
     {
         $this->postJson('/!/newsletter', $this->signUp(['site' => 'en']))->assertOk();
 
-        $this->get($this->confirmationUrl())->assertRedirect('https://example.com/en/thanks');
+        $this->get($this->confirmationUrl())->assertRedirect('https://example.com/en/thanks?newsletter=confirmed');
+    }
+
+    public function test_a_configured_page_with_its_own_query_keeps_it(): void
+    {
+        config(['services.newsletter.confirmed_urls.en' => 'https://example.com/en/thanks?from=mail']);
+        $this->postJson('/!/newsletter', $this->signUp(['site' => 'en']))->assertOk();
+
+        $this->get($this->confirmationUrl())->assertRedirect('https://example.com/en/thanks?from=mail&newsletter=confirmed');
+    }
+
+    /** The toast is in every page and only shown by ?newsletter=confirmed, so cached pages work too. */
+    public function test_the_pages_carry_the_confirmation_toast_in_their_language(): void
+    {
+        $this->withHeader('Accept-Language', 'it-IT,it;q=0.9')
+            ->get(Site::get('it')->absoluteUrl())
+            ->assertOk()
+            ->assertSee('L’iscrizione alla newsletter è confermata.', false)
+            ->assertSee("url.searchParams.get('newsletter') !== 'confirmed'", false);
     }
 
     public function test_names_are_optional(): void

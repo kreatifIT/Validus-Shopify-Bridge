@@ -80,9 +80,10 @@ class NewsletterController extends Controller
 
         SubscribeToNewsletter::dispatch($signup, now()->toIso8601String());
 
-        return redirect()->away(
-            config("services.newsletter.confirmed_urls.{$signup->site}") ?: Site::get($signup->site)->absoluteUrl()
-        );
+        $target = config("services.newsletter.confirmed_urls.{$signup->site}") ?: Site::get($signup->site)->absoluteUrl();
+
+        // Shows the confirmation toast, see layout/_newsletter_confirmed
+        return redirect()->away($target.(str_contains($target, '?') ? '&' : '?').'newsletter=confirmed');
     }
 
     /**

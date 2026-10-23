@@ -1,0 +1,62 @@
+{{#
+  @name Newsletter confirmed
+  @desc Toast after the confirmation link of the newsletter mail:
+        NewsletterController::confirm() redirects with ?newsletter=confirmed.
+
+        - Read in the browser, not by Antlers, so it also works on statically
+          cached pages; the parameter is taken out of the address again.
+        - Waits while the age gate is open (layout/_preloader, html.has-preloader):
+          someone coming from the mail usually sees that first.
+        - Closes by itself after 8 seconds or with the close button.
+        - Sits below the header, not at the bottom: someone new from the mail
+          still has the cookie banner open there, and it would cover the toast.
+#}}
+
+<!-- /layout/_newsletter_confirmed.antlers.html -->
+<div
+  x-data="{
+    open: false,
+    init() {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('newsletter') !== 'confirmed') {
+        return;
+      }
+      url.searchParams.delete('newsletter');
+      window.history.replaceState(window.history.state, '', url);
+
+      const root = document.documentElement;
+      const show = () => {
+        this.open = true;
+        setTimeout(() => (this.open = false), 8000);
+      };
+      if (!root.classList.contains('has-preloader')) {
+        show();
+        return;
+      }
+      const observer = new MutationObserver(() => {
+        if (!root.classList.contains('has-preloader')) {
+          observer.disconnect();
+          show();
+        }
+      });
+      observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+    },
+  }"
+  role="status"
+  aria-live="polite"
+  class="fixed top-[calc(var(--header-height)+var(--top-banner-height)+16px)] right-4 left-4 z-40 sm:left-auto sm:w-[420px] lg:right-12"
+>
+  <div x-show="open" x-cloak x-transition.opacity.duration.300ms class="relative shadow-2xl">
+    {{ partial:components/notification type="success" content="{trans:labels.newsletter_confirmed}" class="pr-12" }}
+    {{ /partial:components/notification }}
+    <button
+      type="button"
+      class="absolute top-0 right-0 flex h-12 w-12 items-center justify-center text-black-50 hover:text-black-charcoal-grey"
+      aria-label="{{ trans:labels.close }}"
+      x-on:click="open = false"
+    >
+      {{ svg src="kreatif/x" width="14" height="14" attr:alt="" attr:aria-hidden="true" }}
+    </button>
+  </div>
+</div>
+<!-- End: /layout/_newsletter_confirmed.antlers.html -->

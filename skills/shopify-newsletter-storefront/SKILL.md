@@ -22,9 +22,11 @@ Website form ──POST /!/newsletter──▶ NewsletterController::subscribe
                link = signed, 7-day URL carrying the sign-up encrypted (no address in the URL)
 Click ──GET /!/newsletter/confirm──▶ NewsletterController::confirm
         ├─ bad / expired link ─▶ errors/newsletter_link (403, in the sign-up's language)
-        └─ SubscribeToNewsletter job ─▶ ShopifyNewsletter::subscribe
-               customerByIdentifier → customerCreate | consent update + tagsAdd
-               consent SUBSCRIBED / CONFIRMED_OPT_IN, locale, tags newsletter + newsletter-{lang}
+        ├─ SubscribeToNewsletter job ─▶ ShopifyNewsletter::subscribe
+        │      customerByIdentifier → customerCreate | consent update + tagsAdd
+        │      consent SUBSCRIBED / CONFIRMED_OPT_IN, locale, tags newsletter + newsletter-{lang}
+        └─ redirect to the home page (or a configured page) with ?newsletter=confirmed
+               → layout/_newsletter_confirmed shows a success toast
 
 Shopify Messaging mail ─▶ <store>.myshopify.com/products/x (?discount via /discount/CODE)
    redirect theme ─▶ website /products/x?…&discount=CODE
@@ -76,7 +78,8 @@ so no second Shopify connection is needed.
    `SubscribeContactToNewsletterTest`, `ShopifyStorefrontRedirectTest`,
    `KeepQueryOnLocaleRedirectTest`) and the full suite. `ShopifyStorefrontRedirectTest` works on real
    products from `content/`, like the project's other content-based tests.
-6. Build the frontend assets and check the form, the mail (Mailpit) and the link page in the browser.
+6. Build the frontend assets and check the form, the mail (Mailpit), the link page and the toast
+   (`/?newsletter=confirmed`) in the browser.
    For the cart, mock the Storefront API in the browser (Playwright `page.route('**/graphql.json')`)
    rather than creating carts in the live shop.
 
@@ -132,6 +135,12 @@ Policies, gift cards, Shopify's bot check / queue pages and the theme editor are
 - Antlers modifiers do not apply to a tag's output (`{{ trans:key | to_json }}` stays raw), so pass
   translated texts to Alpine as rendered elements, or with `{{ trans:key count="<span x-text='…'></span>" }}`.
 - Statamic's `SubmissionCreated` fires twice per submission - the listener keeps a static guard.
+- The confirmation toast is triggered by `?newsletter=confirmed` in the browser, not by a session
+  flash: statically cached pages would never render a flash. Put it below the header, not at the
+  bottom - people arriving from the mail are usually new, so the cookie banner is open at the
+  bottom and covers it (fully on phones). If the site has an age gate that sets a class on `<html>`
+  while open (`has-preloader` here), wait for the class to go before showing the toast, or it
+  expires unseen behind the gate.
 
 **Storefront cart**
 - A discount code Shopify does not know, or whose conditions are not met yet, stays on the cart with

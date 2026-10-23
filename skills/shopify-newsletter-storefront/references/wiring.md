@@ -81,6 +81,17 @@ NEWSLETTER_CONFIRMED_URL_IT=
 NEWSLETTER_CONFIRMED_URL_EN=
 ```
 
+## layout.antlers.html (end of `<body>`)
+
+```antlers
+{{ partial:layout/newsletter_confirmed }}
+```
+
+The toast after the confirmation link (`assets/laravel/resources/views/layout/_newsletter_confirmed.antlers.html`).
+It uses the project's `components/notification` partial with `type="success"` and the `kreatif/x` icon;
+swap both for whatever the project has. Its `top-[calc(var(--header-height)+var(--top-banner-height)+16px)]`
+relies on the header CSS variables of the Peak-based layout.
+
 ## AppServiceProvider::boot() (contact form marketing toggle, optional)
 
 ```php
@@ -120,7 +131,7 @@ The listener expects a Statamic form `contact` with a toggle field `newsletter` 
 'newsletter_link_button' => 'To the home page',
 ```
 
-`resources/lang/{de,it,en}/labels.php` (form messages + cart):
+`resources/lang/{de,it,en}/labels.php` (form messages, confirmation toast, cart):
 
 ```php
 // de
@@ -129,18 +140,24 @@ The listener expects a Statamic form `contact` with a toggle field `newsletter` 
 'cart_discount_amount' => 'Rabatt',
 'newsletter_success' => 'Fast geschafft! Bitte bestätigen Sie Ihre Anmeldung über den Link in der E-Mail, die wir Ihnen gerade geschickt haben.',
 'newsletter_error' => 'Die Anmeldung hat leider nicht geklappt. Bitte versuchen Sie es später erneut.',
+'newsletter_confirmed' => 'Vielen Dank! Die Anmeldung zum Newsletter ist bestätigt.',
+'close' => 'Schließen',
 // it
 'cart_discount_code' => 'Codice sconto',
 'cart_discount_not_applicable' => 'non (ancora) valido per questo carrello',
 'cart_discount_amount' => 'Sconto',
 'newsletter_success' => 'Quasi fatto! La preghiamo di confermare l\'iscrizione tramite il link nell\'e-mail che Le abbiamo appena inviato.',
 'newsletter_error' => 'Purtroppo l\'iscrizione non è andata a buon fine. Si prega di riprovare più tardi.',
+'newsletter_confirmed' => 'Grazie! L’iscrizione alla newsletter è confermata.',
+'close' => 'Chiudi',
 // en
 'cart_discount_code' => 'Discount code',
 'cart_discount_not_applicable' => 'does not apply to this cart (yet)',
 'cart_discount_amount' => 'Discount',
 'newsletter_success' => 'Almost done! Please confirm your subscription via the link in the email we have just sent you.',
 'newsletter_error' => 'Unfortunately the sign-up did not work. Please try again later.',
+'newsletter_confirmed' => 'Thank you! Your newsletter subscription is confirmed.',
+'close' => 'Close',
 ```
 
 German website copy addresses end customers with "Sie", Italian with "tu"/"Lei" as the rest of the site does - match the project.
