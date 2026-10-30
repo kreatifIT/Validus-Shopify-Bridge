@@ -5,6 +5,7 @@ namespace Kreatif\ValidusShopifyBridge\Tests\Unit;
 use Kreatif\ValidusShopifyBridge\Exceptions\MissingProductMappingException;
 use Kreatif\ValidusShopifyBridge\Models\ProductMap;
 use Kreatif\ValidusShopifyBridge\Services\OrderExportService;
+use Kreatif\ValidusShopifyBridge\Shopify\OrderLocalizedFields;
 use Kreatif\ValidusShopifyBridge\Tests\TestCase;
 
 class OrderExportServiceTest extends TestCase
@@ -369,6 +370,29 @@ class OrderExportServiceTest extends TestCase
         $this->assertNull($payload['items'][1]['code']);
         $this->assertSame('Geschenkgutschein', $payload['items'][1]['description']);
         $this->assertSame(25.0, $payload['items'][1]['unitPriceNet']);
+    }
+
+    /** Validus refuses an Italian private customer without one. */
+    public function test_the_codice_fiscale_from_the_checkout_is_sent_as_fiscal_id(): void
+    {
+        $order = $this->order();
+        $order['billing_address']['country_code'] = 'IT';
+        $order[OrderLocalizedFields::PAYLOAD_KEY] = ['TAX_CREDENTIAL_IT' => ' rssmra 80a01 h501u '];
+
+        $customer = $this->service()->buildPayload($order)['customer'];
+
+        $this->assertSame('person', $customer['type']);
+        $this->assertSame('RSSMRA80A01H501U', $customer['fiscalId']);
+    }
+
+    public function test_without_a_codice_fiscale_the_fiscal_id_stays_empty(): void
+    {
+        $this->assertNull($this->service()->buildPayload($this->order())['customer']['fiscalId']);
+
+        $order = $this->order();
+        $order[OrderLocalizedFields::PAYLOAD_KEY] = ['TAX_CREDENTIAL_IT' => '   '];
+
+        $this->assertNull($this->service()->buildPayload($order)['customer']['fiscalId']);
     }
 
     public function test_it_refuses_to_build_a_payload_for_an_unconfigured_payment_gateway(): void

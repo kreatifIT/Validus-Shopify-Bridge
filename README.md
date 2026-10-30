@@ -253,7 +253,9 @@ These are deliberately left unhandled rather than guessed at - the corresponding
 - Payment gateways not yet listed in `payment_code_map`.
 - A Shopify order line item that *has* a `variant_id` but no matching `ProductMap` entry - a real Shopify product that was never imported from Validus. A line item without any `variant_id` at all (gift card, manual draft-order line, voucher) is *not* in this list: it's reported to Validus with `productId`/`code` left null, since Validus accepts a line item without a product code.
 
-Not open items, just known, permanent limitations - not bugs to fix: Italian customers' `fiscalId` (codice fiscale) is always sent as null, since Shopify's default checkout doesn't collect it and it's optional on Validus' side.
+### Codice fiscale
+
+Validus refuses an Italian private customer without a codice fiscale (`400 … "Per i clienti privati italiani specificare codice fiscale"`). The package sends the one the customer entered in Shopify's own checkout field for it - the localized field `TAX_CREDENTIAL_IT`, which the shop has to switch on (Shopify setting or an app that makes it required). The `orders/paid` webhook doesn't carry that field, so for orders with an Italian billing address `ExportOrderToValidusJob` looks it up through the Admin GraphQL API (`OrderLocalizedFields`, needs `read_orders`) before building the payload. Without a value `fiscalId` stays null, and Validus rejects the order.
 
 ## Using with Claude Code
 

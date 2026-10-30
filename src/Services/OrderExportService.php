@@ -5,6 +5,7 @@ namespace Kreatif\ValidusShopifyBridge\Services;
 use Illuminate\Support\Arr;
 use Kreatif\ValidusShopifyBridge\Exceptions\MissingProductMappingException;
 use Kreatif\ValidusShopifyBridge\Models\ProductMap;
+use Kreatif\ValidusShopifyBridge\Shopify\OrderLocalizedFields;
 
 /**
  * Builds the JSON payload ValidusClient::createOrder() expects from a
@@ -23,9 +24,10 @@ use Kreatif\ValidusShopifyBridge\Models\ProductMap;
  *   item without any variant_id at all (gift cards, manual draft-order
  *   lines, a voucher) is not an error: Validus accepts a line item without
  *   a product code, so it's reported with productId/code left null instead.
- * - Italian customers' fiscalId (codice fiscale) is always sent as null -
- *   Shopify's checkout doesn't collect it, and it's optional on Validus'
- *   side, so this is not a defect to fix, just a known limitation.
+ * - the codice fiscale (fiscalId) comes only from Shopify's own checkout
+ *   field for it (localized field TAX_CREDENTIAL_IT), which the shop has to
+ *   switch on; see fiscalId(). Validus refuses an Italian private customer
+ *   without one ("Per i clienti privati italiani specificare codice fiscale").
  * - vatNumber is always null too, same reason - no such field anywhere in
  *   checkout or account; a subclass can supply one, see vatNumber(). Validus
  *   rejects a company without a VAT number ("Per type company specificare
@@ -92,10 +94,7 @@ class OrderExportService
             'type' => $isCompany ? 'company' : 'person',
             'companyName' => $isCompany ? $companyName : null,
             'vatNumber' => $isCompany ? $vatNumber : null,
-            // Codice Fiscale for Italian customers - not collected by
-            // Shopify's default checkout. Optional on Validus' side, so
-            // always sending null is fine as-is.
-            'fiscalId' => null,
+            'fiscalId' => $this->fiscalId($shopifyOrder),
             'firstName' => $this->firstFilled(Arr::get($customer, 'first_name'), Arr::get($billing, 'first_name'), Arr::get($shipping, 'first_name')),
             'lastName' => $this->firstFilled(Arr::get($customer, 'last_name'), Arr::get($billing, 'last_name'), Arr::get($shipping, 'last_name')),
             'email' => $this->firstFilled(Arr::get($shopifyOrder, 'email'), Arr::get($shopifyOrder, 'contact_email'), Arr::get($customer, 'email')),
@@ -111,6 +110,22 @@ class OrderExportService
             'billingAddress' => $this->address($billing),
             'shippingAddress' => $this->withCompany($this->address($shipping), Arr::get($shipping, 'company')),
         ];
+    }
+
+    /**
+     * The Italian codice fiscale the customer entered in Shopify's checkout
+     * (localized field TAX_CREDENTIAL_IT), without spaces and in capitals.
+     * The webhook payload doesn't carry it; ExportOrderToValidusJob adds it
+     * through OrderLocalizedFields. Null when the order has none.
+     *
+     * @param  array<string, mixed>  $shopifyOrder
+     */
+    protected function fiscalId(array $shopifyOrder): ?string
+    {
+        $fields = Arr::get($shopifyOrder, OrderLocalizedFields::PAYLOAD_KEY, []);
+        $fiscalId = strtoupper((string) preg_replace('/\s+/', '', (string) ($fields['TAX_CREDENTIAL_IT'] ?? '')));
+
+        return $fiscalId === '' ? null : $fiscalId;
     }
 
     /**

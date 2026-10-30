@@ -12,6 +12,7 @@ use Kreatif\ValidusShopifyBridge\Clients\ValidusClient;
 use Kreatif\ValidusShopifyBridge\Events\OrderExportFailed;
 use Kreatif\ValidusShopifyBridge\Models\ExportedOrder;
 use Kreatif\ValidusShopifyBridge\Services\OrderExportService;
+use Kreatif\ValidusShopifyBridge\Shopify\OrderLocalizedFields;
 use Throwable;
 
 class ExportOrderToValidusJob implements ShouldQueue
@@ -27,7 +28,7 @@ class ExportOrderToValidusJob implements ShouldQueue
      */
     public function __construct(public array $shopifyOrder) {}
 
-    public function handle(OrderExportService $exportService, ValidusClient $validus): void
+    public function handle(OrderExportService $exportService, ValidusClient $validus, ?OrderLocalizedFields $localizedFields = null): void
     {
         $orderId = (string) $this->shopifyOrder['id'];
 
@@ -37,7 +38,11 @@ class ExportOrderToValidusJob implements ShouldQueue
             return;
         }
 
-        $payload = $exportService->buildPayload($this->shopifyOrder);
+        // The codice fiscale is not in the webhook payload. A failed lookup
+        // fails the attempt and is retried: Validus would refuse an Italian
+        // private customer without it anyway.
+        $localizedFields ??= app(OrderLocalizedFields::class);
+        $payload = $exportService->buildPayload($localizedFields->addTo($this->shopifyOrder));
 
         $validus->createOrder($payload);
 

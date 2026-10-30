@@ -86,6 +86,40 @@ class ExportOrderToValidusJobTest extends TestCase
         Http::assertNothingSent();
     }
 
+    /** The webhook payload has no codice fiscale - the job looks it up in Shopify. */
+    public function test_an_italian_order_goes_out_with_the_codice_fiscale_from_the_checkout(): void
+    {
+        $this->mapTheFixtureLineItem();
+
+        Http::fake([
+            'test-shop.myshopify.com/*' => Http::response(['data' => ['order' => ['localizedFields' => ['nodes' => [
+                ['key' => 'TAX_CREDENTIAL_IT', 'value' => 'RSSMRA80A01H501U'],
+            ]]]]]),
+            'validus.test/*' => Http::response(['success' => true], 200),
+        ]);
+
+        $order = $this->order();
+        $order['billing_address']['country_code'] = 'IT';
+
+        app()->call([new ExportOrderToValidusJob($order), 'handle']);
+
+        Http::assertSent(fn ($request) => $request->url() === 'https://validus.test/ecommerce_bridge/orders'
+            && $request['customer']['fiscalId'] === 'RSSMRA80A01H501U');
+        $this->assertTrue(ExportedOrder::alreadyExported('5551234'));
+    }
+
+    public function test_an_order_from_another_country_does_not_ask_shopify(): void
+    {
+        $this->mapTheFixtureLineItem();
+
+        Http::fake(['validus.test/*' => Http::response(['success' => true], 200)]);
+
+        app()->call([new ExportOrderToValidusJob($this->order()), 'handle']);
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request) => $request['customer']['fiscalId'] === null);
+    }
+
     public function test_it_fires_an_order_export_failed_event_carrying_the_order_number(): void
     {
         Event::fake();
