@@ -11,6 +11,7 @@ use Kreatif\ValidusShopifyBridge\Grouping\ProductCodeGroupingStrategy;
 use Kreatif\ValidusShopifyBridge\Grouping\VariantGroupingStrategy;
 use Kreatif\ValidusShopifyBridge\Services\OrderExportService;
 use Kreatif\ValidusShopifyBridge\Services\ProductSyncService;
+use Kreatif\ValidusShopifyBridge\Shopify\PayoutReader;
 use Kreatif\ValidusShopifyBridge\Shopify\ProductWriter;
 use Kreatif\ValidusShopifyBridge\Shopify\ShopifyGraphqlClient;
 
@@ -40,6 +41,8 @@ class ValidusShopifyServiceProvider extends ServiceProvider
         ));
 
         $this->app->singleton(ProductWriter::class, fn ($app) => new ProductWriter($app->make(ShopifyGraphqlClient::class)));
+
+        $this->app->singleton(PayoutReader::class, fn ($app) => new PayoutReader($app->make(ShopifyGraphqlClient::class)));
 
         $this->app->singleton(ProductSyncService::class, fn ($app) => new ProductSyncService(
             validus: $app->make(ValidusClient::class),

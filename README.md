@@ -8,6 +8,7 @@ Framework-agnostic within the Laravel ecosystem: no dependency on Statamic or an
 
 - **Product import** (`artisan validus-shopify:sync-products`): fetches the Validus catalog, groups the flat per-vintage/per-format rows into Shopify products with variants, and creates/updates them in Shopify (price, SKU, stock).
 - **Order export**: listens for a Shopify `orders/paid` webhook, converts the order into the JSON shape Validus expects, and reports it - once, even if Shopify redelivers the webhook.
+- **Payouts** (`PayoutReader`): reads Shopify Payments payouts with the charges, refunds and fees they're made of, for a consuming app to report (it sends nothing itself).
 
 ## Installation
 
@@ -123,6 +124,33 @@ Validus rejects a company without a VAT number (`Per type company specificare va
 
 - **Without a VAT number** (always, with Shopify's standard checkout): `customer.type` is `"person"`, `companyName` and `vatNumber` are null. The company only appears on the shipping address, in front of the street (`"Ristorante Da Mario, Via Roma 1"`) - Validus' addresses have no field of their own for it.
 - **With a VAT number** - only if a subclass overrides `OrderExportService::vatNumber()`, e.g. to read it from a cart attribute: `"company"` with the company name and VAT number. The shipping address carries the company in front of the street either way.
+
+## Reading Shopify Payments payouts
+
+`Kreatif\ValidusShopifyBridge\Shopify\PayoutReader` reads what Shopify Payments transferred to the shop's bank account in a date range, and which balance transactions (charges, refunds, fees, adjustments, ...) each payout is made of. It only reads - building a report or mail out of it is up to the consuming app:
+
+```php
+use Kreatif\ValidusShopifyBridge\Shopify\PayoutReader;
+
+$payouts = app(PayoutReader::class)->payoutsIssuedBetween(
+    now()->subWeek()->startOfWeek(),
+    now()->subWeek()->endOfWeek(),
+);
+
+foreach ($payouts as $payout) {
+    // $payout: id, legacyId, issuedAt (CarbonImmutable), status (PAID, SCHEDULED, FAILED, CANCELED),
+    // transactionType (DEPOSIT, WITHDRAWAL), net, currency, transactions
+    foreach ($payout['transactions'] as $transaction) {
+        // $transaction: id, type (CHARGE, REFUND, ADJUSTMENT, ...), date (CarbonImmutable),
+        // orderName (e.g. "#1020", null without an order), amount, fee, net, currency, adjustmentReason
+    }
+}
+```
+
+- Both days of the range are included, in the timezone of the dates passed in; `issuedAt` and `date` come back in that timezone too. Payouts are sorted oldest first.
+- Amounts are Shopify's decimal strings (`"48.80"`), unrounded and unformatted.
+- Needs the **`read_shopify_payments_accounts`** and **`read_shopify_payments_payouts`** access scopes on the Admin API token - without them Shopify answers `Access denied for shopifyPaymentsAccount field`.
+- Only Shopify Payments: orders paid through any other gateway (PayPal, bank transfer, ...) never appear in a payout.
 
 ## Running the product sync
 

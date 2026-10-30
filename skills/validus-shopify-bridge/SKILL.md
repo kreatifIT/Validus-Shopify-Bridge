@@ -12,7 +12,7 @@ Full docs live in the package's own `README.md` (`vendor/kreatif/validus-shopify
 
 ## What it does, in one paragraph
 
-`validus-shopify:sync-products` fetches the flat Validus catalog (one row per vintage/format), groups it into Shopify products via a `VariantGroupingStrategy` (default: `ProductCodeGroupingStrategy`, first N digits of `code.code` = product, last N digits = vintage year), and upserts each group into Shopify via the `productSet` GraphQL mutation - matching an existing Shopify product through its own `validus_shopify_product_map` table, never by asking Shopify directly. A separate webhook (`POST /webhook/order`, HMAC-verified) reports paid orders back to Validus via `ExportOrderToValidusJob`.
+`validus-shopify:sync-products` fetches the flat Validus catalog (one row per vintage/format), groups it into Shopify products via a `VariantGroupingStrategy` (default: `ProductCodeGroupingStrategy`, first N digits of `code.code` = product, last N digits = vintage year), and upserts each group into Shopify via the `productSet` GraphQL mutation - matching an existing Shopify product through its own `validus_shopify_product_map` table, never by asking Shopify directly. A separate webhook (`POST /webhook/order`, HMAC-verified) reports paid orders back to Validus via `ExportOrderToValidusJob`. `PayoutReader::payoutsIssuedBetween()` reads Shopify Payments payouts with their balance transactions for the app to report (needs the `read_shopify_payments_accounts` and `read_shopify_payments_payouts` scopes).
 
 ## Before ever running a real (non-dry-run) sync on a store
 
